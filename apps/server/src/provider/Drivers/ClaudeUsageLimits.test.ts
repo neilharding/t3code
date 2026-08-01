@@ -29,6 +29,15 @@ const panel = [
   "  Resets in 2d 1h",
 ].join("\n");
 
+const partialWeeklyPanel = [
+  "Current session",
+  "  24% used",
+  "  Resets 4pm (America/Toronto)",
+  "Current week (all models)",
+  "  67% used",
+  "  Resets Dec 24 at 8am (America/Toronto)",
+].join("\n");
+
 const oauthUsage = {
   five_hour: { utilization: 31, resets_at: "2026-08-01T22:00:00.000Z" },
   seven_day: { utilization: 46, resets_at: "2026-08-05T12:00:00.000Z" },
@@ -75,6 +84,35 @@ const makePty = (onWrite?: (data: string, emit: (data: string) => void) => void)
     },
   };
   return { process, kill, unsubscribeData, unsubscribeExit };
+};
+
+const makeImmediateExitPty = (output: string) => {
+  let dataListener: ((data: string) => void) | undefined;
+  let exitListener: ((event: PtyAdapter.PtyExitEvent) => void) | undefined;
+  const kill = vi.fn();
+  const process: PtyAdapter.PtyProcess = {
+    pid: 123,
+    write: (data) => {
+      if (data !== "/usage\n") return;
+      dataListener?.(output);
+      exitListener?.({ exitCode: 0, signal: null });
+    },
+    resize: () => undefined,
+    kill,
+    onData: (listener) => {
+      dataListener = listener;
+      return () => {
+        dataListener = undefined;
+      };
+    },
+    onExit: (listener) => {
+      exitListener = listener;
+      return () => {
+        exitListener = undefined;
+      };
+    },
+  };
+  return { process, kill };
 };
 
 const runReader = (input: {
@@ -302,6 +340,59 @@ it.layer(NodeServices.layer)("readClaudeUsageLimits", (it) => {
         weekly: { usedPercent: 46, resetsAt: "2026-08-05T12:00:00.000Z" },
       });
     }).pipe(Effect.scoped);
+  });
+
+  it.effect(
+    "returns a partial valid CLI window when the PTY exits before the panel is complete",
+    () => {
+      const pty = makeImmediateExitPty(partialWeeklyPanel);
+      const httpClient = HttpClient.make(() => Effect.die("HTTP fallback should not run"));
+
+      return Effect.gen(function* () {
+        yield* TestClock.setTime(
+          DateTime.toEpochMillis(DateTime.makeUnsafe("2026-08-01T16:00:00.000Z")),
+        );
+        expect(
+          yield* runReader({
+            homePath: "",
+            ptyAdapter: PtyAdapter.PtyAdapter.of({ spawn: () => Effect.succeed(pty.process) }),
+            httpClient,
+          }),
+        ).toEqual({ weekly: { usedPercent: 67, resetsAt: expect.any(String) } });
+      }).pipe(Effect.provide(TestClock.layer()));
+    },
+  );
+
+  it.effect("merges a partial CLI panel over HTTP with CLI precedence", () => {
+    const pty = makeImmediateExitPty(partialWeeklyPanel);
+    const httpClient = HttpClient.make((request) =>
+      Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(oauthUsage))),
+    );
+
+    return Effect.gen(function* () {
+      yield* TestClock.setTime(
+        DateTime.toEpochMillis(DateTime.makeUnsafe("2026-08-01T16:00:00.000Z")),
+      );
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homePath = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-usage-home-" });
+      yield* fs.writeFileString(
+        path.join(homePath, ".credentials.json"),
+        '{"claudeAiOauth":{"accessToken":"sk-ant-oat-test"}}',
+      );
+
+      expect(
+        yield* readClaudeUsageLimits({
+          config: { homePath, binaryPath: "fake-claude" },
+          environment: {},
+          childProcessSpawner: unusedChildProcessSpawner,
+          ptyAdapter: PtyAdapter.PtyAdapter.of({ spawn: () => Effect.succeed(pty.process) }),
+        }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient)),
+      ).toEqual({
+        fiveHour: { usedPercent: 31, resetsAt: "2026-08-01T22:00:00.000Z" },
+        weekly: { usedPercent: 67, resetsAt: expect.any(String) },
+      });
+    }).pipe(Effect.provide(TestClock.layer()), Effect.scoped);
   });
 
   it.effect("kills the PTY and falls back when the usage panel times out", () => {

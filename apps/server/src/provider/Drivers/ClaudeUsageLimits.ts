@@ -394,6 +394,16 @@ const hasUsageLimits = (limits: ProviderUsageLimitsUpdate): boolean =>
 const hasCompleteUsagePanel = (limits: ProviderUsageLimitsUpdate): boolean =>
   limits.fiveHour !== undefined && limits.weekly !== undefined;
 
+const mergeUsageLimits = (
+  fallback: ProviderUsageLimitsUpdate,
+  preferred: ProviderUsageLimitsUpdate | undefined,
+): ProviderUsageLimitsUpdate => ({
+  ...(fallback.fiveHour ? { fiveHour: fallback.fiveHour } : {}),
+  ...(fallback.weekly ? { weekly: fallback.weekly } : {}),
+  ...(preferred?.fiveHour ? { fiveHour: preferred.fiveHour } : {}),
+  ...(preferred?.weekly ? { weekly: preferred.weekly } : {}),
+});
+
 const probeClaudeUsagePanel = Effect.fn("probeClaudeUsagePanel")(function* (input: {
   readonly config: Pick<ClaudeSettings, "binaryPath" | "homePath">;
   readonly environment: NodeJS.ProcessEnv;
@@ -427,7 +437,8 @@ const probeClaudeUsagePanel = Effect.fn("probeClaudeUsagePanel")(function* (inpu
   let unsubscribeExit: () => void = () => undefined;
 
   let output = "";
-  const finish = (value: ProviderUsageLimitsUpdate | undefined) => {
+  let latestLimits: ProviderUsageLimitsUpdate | undefined;
+  const finish = (value: ProviderUsageLimitsUpdate | undefined = latestLimits) => {
     Deferred.doneUnsafe(result, Effect.succeed(value));
   };
 
@@ -439,15 +450,16 @@ const probeClaudeUsagePanel = Effect.fn("probeClaudeUsagePanel")(function* (inpu
       }
       output += data;
       const limits = parseClaudeUsagePanel(output, nowEpochMs);
+      if (hasUsageLimits(limits)) latestLimits = limits;
       if (hasCompleteUsagePanel(limits)) finish(limits);
     });
-    unsubscribeExit = process.onExit(() => finish(undefined));
+    unsubscribeExit = process.onExit(() => finish());
     process.write("/usage\n");
   }).pipe(
     Effect.andThen(
       Deferred.await(result).pipe(
         Effect.timeoutOption(CLAUDE_USAGE_PTY_TIMEOUT),
-        Effect.map(Option.getOrUndefined),
+        Effect.map((value) => Option.getOrElse(value, () => latestLimits)),
       ),
     ),
     Effect.ensuring(
@@ -473,10 +485,9 @@ export const readClaudeUsageLimits = Effect.fn("readClaudeUsageLimits")(function
   const cliLimits = yield* Effect.scoped(probeClaudeUsagePanel(input)).pipe(
     Effect.orElseSucceed(() => undefined),
   );
-  if (cliLimits) return cliLimits;
 
   const token = yield* readClaudeOAuthToken(input);
-  if (!token) return undefined;
+  if (!token) return cliLimits;
   const client = yield* HttpClient.HttpClient;
   const request = HttpClientRequest.get(CLAUDE_USAGE_URL).pipe(
     HttpClientRequest.bearerToken(token),
@@ -484,8 +495,8 @@ export const readClaudeUsageLimits = Effect.fn("readClaudeUsageLimits")(function
     HttpClientRequest.setHeader("accept", "application/json"),
   );
   const response = yield* client.execute(request).pipe(Effect.orElseSucceed(() => undefined));
-  if (!response || response.status < 200 || response.status >= 300) return undefined;
+  if (!response || response.status < 200 || response.status >= 300) return cliLimits;
   const payload = yield* response.json.pipe(Effect.orElseSucceed(() => undefined));
-  const limits = parseClaudeUsageLimits(payload);
+  const limits = mergeUsageLimits(parseClaudeUsageLimits(payload), cliLimits);
   return hasUsageLimits(limits) ? limits : undefined;
 });

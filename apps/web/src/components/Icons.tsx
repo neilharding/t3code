@@ -225,6 +225,33 @@ export const TraeIcon: Icon = (props) => (
   </svg>
 );
 
+export const DevinIcon: Icon = ({ className, ...props }) => (
+  <svg
+    {...props}
+    viewBox="0 0 24 24"
+    fill="none"
+    className={cn("fill-[#0F0F0F] dark:fill-[#F5F5F5]", className)}
+  >
+    <path
+      d="M12 2L21 7V17L12 22L3 17V7L12 2Z"
+      stroke="currentColor"
+      strokeWidth="0"
+      fill="currentColor"
+      opacity="0.12"
+    />
+    <path
+      d="M12 2L21 7V17L12 22L3 17V7L12 2Z"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      fill="none"
+    />
+    <path
+      d="M9 8.5H12.2C14.1 8.5 15.5 10 15.5 12C15.5 14 14.1 15.5 12.2 15.5H9V8.5Z"
+      fill="currentColor"
+    />
+  </svg>
+);
+
 export const KiroIcon: Icon = (props) => (
   <svg {...props} viewBox="0 0 1200 1200" fill="none">
     <rect width="1200" height="1200" rx="260" fill="#9046FF" />

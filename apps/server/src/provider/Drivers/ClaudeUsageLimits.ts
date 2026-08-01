@@ -50,6 +50,190 @@ const parseCurrentWeeklyLimit = (value: unknown) => {
   return undefined;
 };
 
+const stripTerminalControlCharacters = (text: string): string =>
+  text
+    // eslint-disable-next-line no-control-regex -- Claude's rendered terminal panel may contain OSC sequences.
+    .replace(/\u001B\][^\u0007\u001B]*(?:\u0007|\u001B\\)?/gu, "")
+    // eslint-disable-next-line no-control-regex -- Claude's rendered terminal panel may contain CSI sequences.
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, "")
+    // eslint-disable-next-line no-control-regex -- Remove non-printing terminal control characters after preserving line breaks.
+    .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/gu, "");
+
+const parsePanelPercentage = (line: string): number | undefined => {
+  const match = /^\s*([+-]?(?:\d+(?:\.\d+)?|\.\d+))\s*%(?:\s|$)/u.exec(line);
+  if (!match) return undefined;
+  const usedPercent = Number(match[1]);
+  return Number.isFinite(usedPercent) && usedPercent >= 0 && usedPercent <= 100
+    ? usedPercent
+    : undefined;
+};
+
+const parseClockTime = (
+  text: string,
+): { readonly hours: number; readonly minutes: number } | undefined => {
+  const match = /^(\d{1,2})(?::(\d{2}))?\s*(AM|PM)?$/iu.exec(text.trim());
+  if (!match) return undefined;
+  const hours = Number(match[1]);
+  const minutes = match[2] === undefined ? 0 : Number(match[2]);
+  if (!Number.isInteger(hours) || !Number.isInteger(minutes) || minutes < 0 || minutes > 59) {
+    return undefined;
+  }
+  const meridiem = match[3]?.toUpperCase();
+  if (meridiem) {
+    if (hours < 1 || hours > 12) return undefined;
+    return {
+      hours: (hours % 12) + (meridiem === "PM" ? 12 : 0),
+      minutes,
+    };
+  }
+  return hours >= 0 && hours <= 23 ? { hours, minutes } : undefined;
+};
+
+const parseRelativeReset = (description: string, nowEpochMs: number): number | undefined => {
+  const units =
+    /(?<amount>\d+(?:\.\d+)?)\s*(?<unit>days?|d|hours?|hrs?|h|minutes?|mins?|m|seconds?|secs?|s)/giu;
+  let consumed = "";
+  let totalMs = 0;
+  for (const match of description.matchAll(units)) {
+    consumed += match[0];
+    const amount = Number(match.groups?.amount);
+    const unit = match.groups?.unit.toLowerCase();
+    const multiplier =
+      unit === "d" || unit === "day" || unit === "days"
+        ? 86_400_000
+        : unit === "h" || unit === "hr" || unit === "hrs" || unit === "hour" || unit === "hours"
+          ? 3_600_000
+          : unit === "m" ||
+              unit === "min" ||
+              unit === "mins" ||
+              unit === "minute" ||
+              unit === "minutes"
+            ? 60_000
+            : 1_000;
+    if (!Number.isFinite(amount)) return undefined;
+    totalMs += amount * multiplier;
+  }
+  if (
+    !consumed ||
+    description.replace(units, "").replace(/[\s,]+/gu, "") ||
+    !Number.isFinite(totalMs)
+  ) {
+    return undefined;
+  }
+  return nowEpochMs + totalMs;
+};
+
+const resolvePanelReset = (line: string, nowEpochMs: number): string | undefined => {
+  const match = /^\s*resets\s+(.+?)\s*$/iu.exec(line);
+  if (!match || !Number.isFinite(nowEpochMs)) return undefined;
+  const description = match[1].replace(/\s+\([^()]*\)\s*$/u, "");
+  let resetEpochMs: number | undefined;
+
+  if (/^in\s+/iu.test(description)) {
+    resetEpochMs = parseRelativeReset(description.replace(/^in\s+/iu, ""), nowEpochMs);
+  } else {
+    const timeAtEnd =
+      /^(.*?)(?:,?\s+at\s+|,\s+)(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)$/iu.exec(description) ??
+      /^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)$/iu.exec(
+        description,
+      );
+    const clockTime = parseClockTime(timeAtEnd ? timeAtEnd[2] : description);
+    if (!clockTime) return undefined;
+    const now = new Date(nowEpochMs);
+    if (!timeAtEnd) {
+      const candidate = new Date(nowEpochMs);
+      candidate.setHours(clockTime.hours, clockTime.minutes, 0, 0);
+      if (candidate.getTime() <= nowEpochMs) candidate.setDate(candidate.getDate() + 1);
+      resetEpochMs = candidate.getTime();
+    }
+    const dateDescription = timeAtEnd?.[1]?.trim();
+    const weekday = dateDescription
+      ? /^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)$/iu.exec(dateDescription)
+      : undefined;
+    const calendarDate =
+      /^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\s+(\d{1,2})(?:,?\s+(\d{4}))?$/iu.exec(
+        dateDescription ?? "",
+      );
+    if (weekday) {
+      const weekdayIndex = [
+        "sunday",
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+      ].indexOf(weekday[1].toLowerCase());
+      const candidate = new Date(nowEpochMs);
+      candidate.setHours(clockTime.hours, clockTime.minutes, 0, 0);
+      candidate.setDate(candidate.getDate() + ((weekdayIndex - candidate.getDay() + 7) % 7));
+      if (candidate.getTime() <= nowEpochMs) candidate.setDate(candidate.getDate() + 7);
+      resetEpochMs = candidate.getTime();
+    } else if (calendarDate) {
+      const monthIndex = new Date(`${calendarDate[1]} 1, 2000`).getMonth();
+      const day = Number(calendarDate[2]);
+      const providedYear = calendarDate[3] === undefined ? undefined : Number(calendarDate[3]);
+      const candidate = new Date(
+        providedYear ?? now.getFullYear(),
+        monthIndex,
+        day,
+        clockTime.hours,
+        clockTime.minutes,
+      );
+      if (
+        candidate.getMonth() !== monthIndex ||
+        candidate.getDate() !== day ||
+        (providedYear !== undefined && candidate.getFullYear() !== providedYear)
+      ) {
+        return undefined;
+      }
+      if (providedYear === undefined && candidate.getTime() <= nowEpochMs) {
+        candidate.setFullYear(candidate.getFullYear() + 1);
+      }
+      resetEpochMs = candidate.getTime();
+    }
+  }
+  if (!Number.isFinite(resetEpochMs) || resetEpochMs <= nowEpochMs) return undefined;
+  return new Date(resetEpochMs).toISOString();
+};
+
+const parsePanelWindow = (lines: ReadonlyArray<string>, label: string, nowEpochMs: number) => {
+  const labelIndex = lines.reduce<number>(
+    (latest, line, index) => (line.trim() === label ? index : latest),
+    -1,
+  );
+  if (labelIndex < 0) return undefined;
+  const nextSectionIndex = lines.findIndex(
+    (line, index) => index > labelIndex && line.trim().startsWith("Current "),
+  );
+  const rowLines = lines.slice(
+    labelIndex + 1,
+    nextSectionIndex < 0 ? labelIndex + 7 : nextSectionIndex,
+  );
+  const percentageIndex = rowLines.findIndex((line) => parsePanelPercentage(line) !== undefined);
+  if (percentageIndex < 0) return undefined;
+  const usedPercent = parsePanelPercentage(rowLines[percentageIndex]);
+  const resetLine = rowLines.slice(percentageIndex + 1).find((line) => /^\s*resets\b/iu.test(line));
+  const resetsAt = resetLine ? resolvePanelReset(resetLine, nowEpochMs) : undefined;
+  return usedPercent === undefined || resetsAt === undefined
+    ? undefined
+    : { usedPercent, resetsAt };
+};
+
+/** Parse the explicit session and all-model weekly rows from Claude Code's rendered /usage panel. */
+export const parseClaudeUsagePanel = (
+  text: string,
+  nowEpochMs: number,
+): ProviderUsageLimitsUpdate => {
+  const lines = stripTerminalControlCharacters(text).split(/\r?\n/u);
+  const fiveHour = parsePanelWindow(lines, "Current session", nowEpochMs);
+  const weekly = parsePanelWindow(lines, "Current week (all models)", nowEpochMs);
+  return {
+    ...(fiveHour ? { fiveHour } : {}),
+    ...(weekly ? { weekly } : {}),
+  };
+};
+
 /** Parse only the two plan windows T3 Code displays. */
 export const parseClaudeUsageLimits = (payload: unknown): ProviderUsageLimitsUpdate => {
   const record = asRecord(payload);

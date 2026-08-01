@@ -1,6 +1,8 @@
 import * as NodeOS from "node:os";
 
 import type { ClaudeSettings, ProviderUsageLimitsUpdate } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -11,8 +13,14 @@ import { HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import { expandHomePath } from "../../pathExpansion.ts";
+import * as PtyAdapter from "../../terminal/PtyAdapter.ts";
+import { makeClaudeEnvironment } from "./ClaudeHome.ts";
 
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+const CLAUDE_USAGE_PTY_COLS = 100;
+const CLAUDE_USAGE_PTY_ROWS = 30;
+const CLAUDE_USAGE_PTY_TIMEOUT = "2 seconds";
+const MAX_CLAUDE_USAGE_PTY_OUTPUT_LENGTH = 64 * 1024;
 const decodeUnknownJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString);
 const KEYCHAIN_ACCOUNT_PATTERN = /^[A-Za-z0-9._-]+$/u;
 
@@ -319,15 +327,82 @@ const readClaudeOAuthToken = Effect.fn("readClaudeOAuthToken")(function* (input:
   );
 });
 
+const hasUsageLimits = (limits: ProviderUsageLimitsUpdate): boolean =>
+  limits.fiveHour !== undefined || limits.weekly !== undefined;
+
+const probeClaudeUsagePanel = Effect.fn("probeClaudeUsagePanel")(function* (input: {
+  readonly config: Pick<ClaudeSettings, "binaryPath" | "homePath">;
+  readonly environment: NodeJS.ProcessEnv;
+  readonly ptyAdapter?: PtyAdapter.PtyAdapter["Service"];
+}) {
+  const ptyAdapter = input.ptyAdapter;
+  if (!ptyAdapter) return undefined;
+  const fileSystem = yield* FileSystem.FileSystem;
+  const nowEpochMs = yield* Clock.currentTimeMillis;
+  const claudeEnvironment = yield* makeClaudeEnvironment(input.config, input.environment);
+  const probeDirectory = yield* fileSystem.makeTempDirectoryScoped({
+    prefix: "t3-claude-usage-probe-",
+  });
+  const process = yield* ptyAdapter.spawn({
+    shell: input.config.binaryPath,
+    cwd: probeDirectory,
+    cols: CLAUDE_USAGE_PTY_COLS,
+    rows: CLAUDE_USAGE_PTY_ROWS,
+    env: claudeEnvironment,
+  });
+  const result = yield* Deferred.make<ProviderUsageLimitsUpdate | undefined>();
+  let unsubscribeData: () => void = () => undefined;
+  let unsubscribeExit: () => void = () => undefined;
+
+  let output = "";
+  const finish = (value: ProviderUsageLimitsUpdate | undefined) => {
+    Deferred.doneUnsafe(result, Effect.succeed(value));
+  };
+
+  return yield* Effect.sync(() => {
+    unsubscribeData = process.onData((data) => {
+      output += data;
+      if (output.length > MAX_CLAUDE_USAGE_PTY_OUTPUT_LENGTH) {
+        finish(undefined);
+        return;
+      }
+      const limits = parseClaudeUsagePanel(output, nowEpochMs);
+      if (hasUsageLimits(limits)) finish(limits);
+    });
+    unsubscribeExit = process.onExit(() => finish(undefined));
+    process.write("/usage\n");
+  }).pipe(
+    Effect.andThen(
+      Deferred.await(result).pipe(
+        Effect.timeoutOption(CLAUDE_USAGE_PTY_TIMEOUT),
+        Effect.map(Option.getOrUndefined),
+      ),
+    ),
+    Effect.ensuring(
+      Effect.sync(() => {
+        unsubscribeData();
+        unsubscribeExit();
+        process.kill();
+      }),
+    ),
+  );
+});
+
 /**
  * Fetches the same OAuth usage snapshot Claude Code uses, without creating a
  * Claude session. Credential material stays in this server process.
  */
 export const readClaudeUsageLimits = Effect.fn("readClaudeUsageLimits")(function* (input: {
-  readonly config: Pick<ClaudeSettings, "homePath">;
+  readonly config: Pick<ClaudeSettings, "binaryPath" | "homePath">;
   readonly environment: NodeJS.ProcessEnv;
   readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner["Service"];
+  readonly ptyAdapter?: PtyAdapter.PtyAdapter["Service"];
 }) {
+  const cliLimits = yield* Effect.scoped(probeClaudeUsagePanel(input)).pipe(
+    Effect.orElseSucceed(() => undefined),
+  );
+  if (cliLimits) return cliLimits;
+
   const token = yield* readClaudeOAuthToken(input);
   if (!token) return undefined;
   const client = yield* HttpClient.HttpClient;
@@ -340,5 +415,5 @@ export const readClaudeUsageLimits = Effect.fn("readClaudeUsageLimits")(function
   if (!response || response.status < 200 || response.status >= 300) return undefined;
   const payload = yield* response.json.pipe(Effect.orElseSucceed(() => undefined));
   const limits = parseClaudeUsageLimits(payload);
-  return limits.fiveHour || limits.weekly ? limits : undefined;
+  return hasUsageLimits(limits) ? limits : undefined;
 });

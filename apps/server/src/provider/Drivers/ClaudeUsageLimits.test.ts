@@ -1,6 +1,93 @@
-import { describe, expect, it } from "vite-plus/test";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Fiber from "effect/Fiber";
+import * as Path from "effect/Path";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import { describe, expect, it, vi } from "@effect/vitest";
+import * as TestClock from "effect/testing/TestClock";
 
-import { parseClaudeUsageLimits, parseClaudeUsagePanel } from "./ClaudeUsageLimits.ts";
+import * as PtyAdapter from "../../terminal/PtyAdapter.ts";
+import {
+  parseClaudeUsageLimits,
+  parseClaudeUsagePanel,
+  readClaudeUsageLimits,
+} from "./ClaudeUsageLimits.ts";
+
+const panel = [
+  "Current session",
+  "  19% used",
+  "  Resets in 5h",
+  "Current week (all models)",
+  "  67% used",
+  "  Resets in 2d 1h",
+].join("\n");
+
+const oauthUsage = {
+  five_hour: { utilization: 31, resets_at: "2026-08-01T22:00:00.000Z" },
+  seven_day: { utilization: 46, resets_at: "2026-08-05T12:00:00.000Z" },
+};
+
+const unusedChildProcessSpawner = ChildProcessSpawner.make(() =>
+  Effect.succeed(
+    ChildProcessSpawner.makeHandle({
+      pid: ChildProcessSpawner.ProcessId(1),
+      exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+      isRunning: Effect.succeed(false),
+      kill: () => Effect.void,
+      unref: Effect.succeed(Effect.void),
+      stdin: Sink.drain,
+      stdout: Stream.empty,
+      stderr: Stream.empty,
+      all: Stream.empty,
+      getInputFd: () => Sink.drain,
+      getOutputFd: () => Stream.empty,
+    }),
+  ),
+);
+
+const makePty = (onWrite?: (data: string, emit: (data: string) => void) => void) => {
+  let dataListener: ((data: string) => void) | undefined;
+  const kill = vi.fn();
+  const unsubscribeData = vi.fn(() => {
+    dataListener = undefined;
+  });
+  const unsubscribeExit = vi.fn(() => {
+    return undefined;
+  });
+  const process: PtyAdapter.PtyProcess = {
+    pid: 123,
+    write: (data) => onWrite?.(data, (output) => dataListener?.(output)),
+    resize: () => undefined,
+    kill,
+    onData: (listener) => {
+      dataListener = listener;
+      return unsubscribeData;
+    },
+    onExit: () => {
+      return unsubscribeExit;
+    },
+  };
+  return { process, kill, unsubscribeData, unsubscribeExit };
+};
+
+const runReader = (input: {
+  readonly homePath: string;
+  readonly ptyAdapter: PtyAdapter.PtyAdapter["Service"];
+  readonly httpClient: HttpClient.HttpClient;
+}) =>
+  Effect.gen(function* () {
+    const result = yield* readClaudeUsageLimits({
+      config: { homePath: input.homePath, binaryPath: "fake-claude" },
+      environment: {},
+      childProcessSpawner: unusedChildProcessSpawner,
+      ptyAdapter: input.ptyAdapter,
+    });
+    return result;
+  }).pipe(Effect.provideService(HttpClient.HttpClient, input.httpClient), Effect.scoped);
 
 describe("parseClaudeUsageLimits", () => {
   it("maps Claude's five-hour and seven-day OAuth windows", () => {
@@ -42,6 +129,96 @@ describe("parseClaudeUsageLimits", () => {
         seven_day_opus: { utilization: 12, resets_at: "2026-08-05T12:00:00.000Z" },
       }),
     ).toEqual({});
+  });
+});
+
+it.layer(NodeServices.layer)("readClaudeUsageLimits", (it) => {
+  it.effect("returns the Claude usage panel before attempting the OAuth HTTP reader", () => {
+    const pty = makePty((data, emit) => {
+      if (data === "/usage\n") emit(panel);
+    });
+    const httpCalls: Array<string> = [];
+    const httpClient = HttpClient.make((request) =>
+      Effect.sync(() => {
+        httpCalls.push(request.url);
+        return HttpClientResponse.fromWeb(request, Response.json(oauthUsage));
+      }),
+    );
+
+    return Effect.gen(function* () {
+      expect(
+        yield* runReader({
+          homePath: "",
+          ptyAdapter: PtyAdapter.PtyAdapter.of({ spawn: () => Effect.succeed(pty.process) }),
+          httpClient,
+        }),
+      ).toEqual({
+        fiveHour: { usedPercent: 19, resetsAt: expect.any(String) },
+        weekly: { usedPercent: 67, resetsAt: expect.any(String) },
+      });
+      expect(httpCalls).toEqual([]);
+      expect(pty.kill).toHaveBeenCalledTimes(1);
+      expect(pty.unsubscribeData).toHaveBeenCalledTimes(1);
+      expect(pty.unsubscribeExit).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it.effect("falls back to OAuth HTTP when the PTY probe cannot start", () => {
+    const httpCalls: Array<string> = [];
+    const httpClient = HttpClient.make((request) =>
+      Effect.sync(() => {
+        httpCalls.push(request.url);
+        return HttpClientResponse.fromWeb(request, Response.json(oauthUsage));
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homePath = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-usage-home-" });
+      yield* fs.writeFileString(
+        path.join(homePath, ".credentials.json"),
+        '{"claudeAiOauth":{"accessToken":"sk-ant-oat-test"}}',
+      );
+
+      const result = yield* readClaudeUsageLimits({
+        config: { homePath, binaryPath: "fake-claude" },
+        environment: {},
+        childProcessSpawner: unusedChildProcessSpawner,
+        ptyAdapter: PtyAdapter.PtyAdapter.of({
+          spawn: () =>
+            Effect.fail(new PtyAdapter.PtySpawnError({ adapter: "test", shell: "fake-claude" })),
+        }),
+      }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient));
+
+      expect(result).toEqual({
+        fiveHour: { usedPercent: 31, resetsAt: "2026-08-01T22:00:00.000Z" },
+        weekly: { usedPercent: 46, resetsAt: "2026-08-05T12:00:00.000Z" },
+      });
+      expect(httpCalls).toEqual(["https://api.anthropic.com/api/oauth/usage"]);
+    }).pipe(Effect.scoped);
+  });
+
+  it.effect("kills the PTY and falls back when the usage panel times out", () => {
+    const pty = makePty();
+    const httpClient = HttpClient.make((request) =>
+      Effect.succeed(HttpClientResponse.fromWeb(request, new Response(null, { status: 401 }))),
+    );
+
+    return Effect.gen(function* () {
+      const reader = yield* runReader({
+        homePath: "",
+        ptyAdapter: PtyAdapter.PtyAdapter.of({ spawn: () => Effect.succeed(pty.process) }),
+        httpClient,
+      }).pipe(Effect.forkChild);
+
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust("2 seconds");
+      expect(yield* Fiber.join(reader)).toBeUndefined();
+      expect(pty.kill).toHaveBeenCalledTimes(1);
+      expect(pty.unsubscribeData).toHaveBeenCalledTimes(1);
+      expect(pty.unsubscribeExit).toHaveBeenCalledTimes(1);
+    }).pipe(Effect.provide(TestClock.layer()));
   });
 });
 

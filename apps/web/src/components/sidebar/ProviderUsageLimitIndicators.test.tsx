@@ -154,7 +154,7 @@ describe("ProviderUsageLimitIndicatorsView", () => {
     NOW,
   )[0]!;
 
-  it("renders compact dot-only chip copy in five-hour then weekly order", () => {
+  it("renders the compact OpenAI mark with five-hour then weekly copy", () => {
     const markup = renderToStaticMarkup(
       <ProviderUsageLimitIndicatorsView indicators={[indicator]} />,
     );
@@ -164,7 +164,23 @@ describe("ProviderUsageLimitIndicatorsView", () => {
     expect(markup).toContain("wk 61%");
     expect(markup.indexOf("5h 20%")).toBeLessThan(markup.indexOf("wk 61%"));
     expect(markup).not.toContain(">Codex<");
+    expect(markup).toContain('viewBox="0 0 256 260"');
     expect(markup).toContain('aria-label="Codex Personal usage: 5 hour 20% used, week 61% used"');
+  });
+
+  it("renders the compact Claude mark for Claude instances", () => {
+    const claudeIndicator = buildProviderUsageLimitIndicators(
+      [makeLimits(claudeId, claude)],
+      [makeProvider(claudeId, claude)],
+      NOW,
+    )[0]!;
+
+    const markup = renderToStaticMarkup(
+      <ProviderUsageLimitIndicatorsView indicators={[claudeIndicator]} />,
+    );
+
+    expect(markup).toContain('viewBox="0 0 256 257"');
+    expect(markup).toContain('aria-label="Claude Code usage: 5 hour 20% used, week 61% used"');
   });
 
   it("renders the real-data waiting state without meters or made-up percentages", () => {

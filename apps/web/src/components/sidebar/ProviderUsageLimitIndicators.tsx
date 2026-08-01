@@ -4,13 +4,14 @@ import type {
   ProviderUsageLimitsSnapshot,
   ServerProvider,
 } from "@t3tools/contracts";
-import { memo, useMemo, type CSSProperties } from "react";
+import { memo, useMemo, useState } from "react";
 
 import {
   deriveProviderInstanceEntries,
   normalizeProviderAccentColor,
 } from "../../providerInstances";
 import { primaryProviderUsageLimitsAtom, primaryServerProvidersAtom } from "../../state/server";
+import { ClaudeAI, OpenAI } from "../Icons";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 const DEFAULT_COLORS = {
@@ -20,6 +21,7 @@ const DEFAULT_COLORS = {
 
 interface ProviderUsageLimitIndicatorBase {
   readonly providerInstanceId: ProviderInstanceId;
+  readonly driver: "codex" | "claudeAgent";
   readonly label: string;
   readonly color: string;
 }
@@ -86,6 +88,7 @@ export function buildProviderUsageLimitIndicators(
       const usage = limitsByInstance.get(provider.instanceId);
       const base = {
         providerInstanceId: provider.instanceId,
+        driver: provider.driverKind === "codex" ? "codex" : "claudeAgent",
         label: provider.displayName,
         color:
           normalizeProviderAccentColor(provider.accentColor) ??
@@ -219,63 +222,79 @@ export function ProviderUsageLimitPendingDetail(props: {
   );
 }
 
+function ProviderUsageLimitIndicatorChip(props: {
+  readonly indicator: ProviderUsageLimitIndicator;
+}) {
+  const { indicator } = props;
+  const [open, setOpen] = useState(false);
+  const ProviderIcon = indicator.driver === "codex" ? OpenAI : ClaudeAI;
+  const usageLabel =
+    indicator.state === "ready"
+      ? [
+          indicator.fiveHourPercent === undefined
+            ? "5 hour unavailable"
+            : `5 hour ${indicator.fiveHourPercent}% used`,
+          indicator.weeklyPercent === undefined
+            ? "week unavailable"
+            : `week ${indicator.weeklyPercent}% used`,
+        ].join(", ")
+      : "waiting for real usage data";
+
+  return (
+    <Tooltip open={open} onOpenChange={setOpen}>
+      <TooltipTrigger
+        closeOnClick={false}
+        delay={0}
+        closeDelay={0}
+        render={
+          <button
+            type="button"
+            aria-label={`${indicator.label} usage: ${usageLabel}`}
+            onClick={() => setOpen((wasOpen) => !wasOpen)}
+            className="flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-md border border-sidebar-border/70 bg-sidebar-control-surface px-2 text-[11px] font-medium tabular-nums text-sidebar-foreground hover:bg-sidebar-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+          />
+        }
+      >
+        <ProviderIcon aria-hidden className="size-3 shrink-0" />
+        <span>
+          5h{" "}
+          {indicator.state === "ready" && indicator.fiveHourPercent !== undefined
+            ? `${indicator.fiveHourPercent}%`
+            : "—"}
+        </span>
+        <span aria-hidden className="text-sidebar-muted-foreground/50">
+          |
+        </span>
+        <span>
+          wk{" "}
+          {indicator.state === "ready" && indicator.weeklyPercent !== undefined
+            ? `${indicator.weeklyPercent}%`
+            : "—"}
+        </span>
+      </TooltipTrigger>
+      <TooltipPopup side="right" align="start" sideOffset={8} className="px-2 py-1">
+        {indicator.state === "ready" ? (
+          <ProviderUsageLimitDetail indicator={indicator} />
+        ) : (
+          <ProviderUsageLimitPendingDetail indicator={indicator} />
+        )}
+      </TooltipPopup>
+    </Tooltip>
+  );
+}
+
 export const ProviderUsageLimitIndicatorsView = memo(
   function ProviderUsageLimitIndicatorsView(props: {
     readonly indicators: ReadonlyArray<ProviderUsageLimitIndicator>;
   }) {
     return (
       <div className="grid grid-cols-2 gap-1 group-data-[collapsible=icon]:hidden">
-        {props.indicators.map((indicator) => {
-          const dotStyle = { backgroundColor: indicator.color } satisfies CSSProperties;
-          const usageLabel =
-            indicator.state === "ready"
-              ? [
-                  indicator.fiveHourPercent === undefined
-                    ? "5 hour unavailable"
-                    : `5 hour ${indicator.fiveHourPercent}% used`,
-                  indicator.weeklyPercent === undefined
-                    ? "week unavailable"
-                    : `week ${indicator.weeklyPercent}% used`,
-                ].join(", ")
-              : "waiting for real usage data";
-          return (
-            <Tooltip key={indicator.providerInstanceId}>
-              <TooltipTrigger
-                render={
-                  <button
-                    type="button"
-                    aria-label={`${indicator.label} usage: ${usageLabel}`}
-                    className="flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-md border border-sidebar-border/70 bg-sidebar-control-surface px-2 text-[11px] font-medium tabular-nums text-sidebar-foreground hover:bg-sidebar-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
-                  />
-                }
-              >
-                <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={dotStyle} />
-                <span>
-                  5h{" "}
-                  {indicator.state === "ready" && indicator.fiveHourPercent !== undefined
-                    ? `${indicator.fiveHourPercent}%`
-                    : "—"}
-                </span>
-                <span aria-hidden className="text-sidebar-muted-foreground/50">
-                  |
-                </span>
-                <span>
-                  wk{" "}
-                  {indicator.state === "ready" && indicator.weeklyPercent !== undefined
-                    ? `${indicator.weeklyPercent}%`
-                    : "—"}
-                </span>
-              </TooltipTrigger>
-              <TooltipPopup side="right" align="start" sideOffset={8} className="px-2 py-1">
-                {indicator.state === "ready" ? (
-                  <ProviderUsageLimitDetail indicator={indicator} />
-                ) : (
-                  <ProviderUsageLimitPendingDetail indicator={indicator} />
-                )}
-              </TooltipPopup>
-            </Tooltip>
-          );
-        })}
+        {props.indicators.map((indicator) => (
+          <ProviderUsageLimitIndicatorChip
+            key={indicator.providerInstanceId}
+            indicator={indicator}
+          />
+        ))}
       </div>
     );
   },

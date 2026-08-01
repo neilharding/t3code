@@ -19,6 +19,7 @@ import {
   hasConfiguredMcpServer,
   isRecoverableThreadResumeError,
   openCodexThread,
+  readCodexUsageLimits,
 } from "./CodexSessionRuntime.ts";
 const isCodexAppServerRequestError = Schema.is(CodexErrors.CodexAppServerRequestError);
 
@@ -35,6 +36,61 @@ describe("CodexSessionRuntimeIdentifierGenerationError", () => {
     NodeAssert.equal(
       error.message,
       "Failed to generate Codex App Server identifier for provider-event.",
+    );
+  });
+});
+
+describe("readCodexUsageLimits", () => {
+  it("requests and preserves the complete account rate-limit snapshot", () => {
+    const calls: Array<{ method: string; payload: unknown }> = [];
+    NodeAssert.deepStrictEqual(
+      Effect.runSync(
+        readCodexUsageLimits({
+          request: (method, payload) => {
+            calls.push({ method, payload });
+            return Effect.succeed({
+              rateLimits: {
+                primary: {
+                  usedPercent: 20,
+                  resetsAt: 1_767_243_600,
+                  windowDurationMins: 300,
+                },
+                secondary: {
+                  usedPercent: 70,
+                  resetsAt: 1_767_830_400,
+                  windowDurationMins: 10_080,
+                },
+              },
+            });
+          },
+        }),
+      ),
+      {
+        rateLimits: {
+          primary: {
+            usedPercent: 20,
+            resetsAt: 1_767_243_600,
+            windowDurationMins: 300,
+          },
+          secondary: {
+            usedPercent: 70,
+            resetsAt: 1_767_830_400,
+            windowDurationMins: 10_080,
+          },
+        },
+      },
+    );
+    NodeAssert.deepStrictEqual(calls, [{ method: "account/rateLimits/read", payload: undefined }]);
+  });
+
+  it("treats an unavailable rate-limit read as absent usage data", () => {
+    NodeAssert.equal(
+      Effect.runSync(
+        readCodexUsageLimits({
+          request: () => Effect.fail({ _tag: "UnsupportedRateLimitsRead" as const }),
+        }),
+      ),
+      undefined,
     );
   });
 });

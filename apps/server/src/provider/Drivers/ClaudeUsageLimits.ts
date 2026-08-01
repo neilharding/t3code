@@ -40,11 +40,24 @@ const parseWindow = (value: unknown) => {
   return { usedPercent, resetsAt };
 };
 
+const parseCurrentWeeklyLimit = (value: unknown) => {
+  if (!Array.isArray(value)) return undefined;
+  for (const entry of value) {
+    const record = asRecord(entry);
+    if (record?.kind !== "weekly_all" || record.group !== "weekly") continue;
+    return parseWindow({ utilization: record.percent, resets_at: record.resets_at });
+  }
+  return undefined;
+};
+
 /** Parse only the two plan windows T3 Code displays. */
 export const parseClaudeUsageLimits = (payload: unknown): ProviderUsageLimitsUpdate => {
   const record = asRecord(payload);
   const fiveHour = parseWindow(record?.five_hour);
-  const weekly = parseWindow(record?.seven_day);
+  // Anthropic's newer `limits` collection supersedes the legacy flat fields
+  // when both are present. Prefer its all-models weekly limit so reset times
+  // stay aligned with Claude Code's current usage panel.
+  const weekly = parseCurrentWeeklyLimit(record?.limits) ?? parseWindow(record?.seven_day);
   return {
     ...(fiveHour ? { fiveHour } : {}),
     ...(weekly ? { weekly } : {}),

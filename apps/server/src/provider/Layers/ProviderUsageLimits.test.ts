@@ -65,6 +65,21 @@ const makeUsageEvent = (
 
 const unsupported = () => Effect.die(new Error("unsupported provider test call")) as never;
 
+const makeTestLayer = (
+  providerService: ProviderServiceShape,
+  providerRegistry: ProviderRegistryShape,
+  config: ServerConfig["Service"],
+) =>
+  ProviderUsageLimitsLive.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.succeed(ProviderService, providerService),
+        Layer.succeed(ProviderRegistry, providerRegistry),
+        Layer.succeed(ServerConfig, config),
+      ),
+    ),
+  );
+
 it.layer(NodeServices.layer)("ProviderUsageLimitsLive", (it) => {
   it.effect("hydrates a valid complete startup snapshot from cache", () =>
     Effect.gen(function* () {
@@ -106,11 +121,8 @@ it.layer(NodeServices.layer)("ProviderUsageLimitsLive", (it) => {
 
       const snapshots = yield* ProviderUsageLimits.pipe(
         Effect.flatMap((usageLimits) => usageLimits.getSnapshots),
-        Effect.provide(ProviderUsageLimitsLive),
-        Effect.provide(Layer.succeed(ProviderService, providerService)),
-        Effect.provide(Layer.succeed(ProviderRegistry, providerRegistry)),
         Effect.provide(
-          Layer.succeed(ServerConfig, {
+          makeTestLayer(providerService, providerRegistry, {
             providerStatusCacheDir: cacheDir,
           } as ServerConfig["Service"]),
         ),
@@ -194,10 +206,7 @@ it.layer(NodeServices.layer)("ProviderUsageLimitsLive", (it) => {
       });
 
       return yield* program.pipe(
-        Effect.provide(ProviderUsageLimitsLive),
-        Effect.provide(Layer.succeed(ProviderService, providerService)),
-        Effect.provide(Layer.succeed(ProviderRegistry, providerRegistry)),
-        Effect.provide(Layer.succeed(ServerConfig, config)),
+        Effect.provide(makeTestLayer(providerService, providerRegistry, config)),
       );
     }),
   );
@@ -254,11 +263,8 @@ it.layer(NodeServices.layer)("ProviderUsageLimitsLive", (it) => {
       });
 
       return yield* program.pipe(
-        Effect.provide(ProviderUsageLimitsLive),
-        Effect.provide(Layer.succeed(ProviderService, providerService)),
-        Effect.provide(Layer.succeed(ProviderRegistry, providerRegistry)),
         Effect.provide(
-          Layer.succeed(ServerConfig, {
+          makeTestLayer(providerService, providerRegistry, {
             providerStatusCacheDir: cacheDir,
           } as ServerConfig["Service"]),
         ),

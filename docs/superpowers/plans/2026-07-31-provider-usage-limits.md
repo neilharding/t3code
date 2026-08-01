@@ -307,7 +307,7 @@ Expected: PASS.
 The focused tests and targeted lint pass. Final server typecheck remains deferred until Task 4
 completes the new RPC group's authorization, handler, and runtime dependency wiring.
 
-- [ ] **Step 11: Commit**
+- [x] **Step 11: Commit**
 
 ```bash
 git add apps/server/src/provider/providerUsageLimits.ts apps/server/src/provider/providerUsageLimits.test.ts apps/server/src/provider/providerUsageLimitsCache.ts apps/server/src/provider/providerUsageLimitsCache.test.ts apps/server/src/provider/Services/ProviderUsageLimits.ts apps/server/src/provider/Layers/ProviderUsageLimits.ts apps/server/src/provider/Layers/ProviderUsageLimits.test.ts
@@ -324,21 +324,21 @@ git commit -m "feat(server): track provider usage limit snapshots"
 - Modify: `apps/server/src/auth/RpcAuthorization.test.ts`
 - Modify: `apps/server/src/server.test.ts`
 
-- [ ] **Step 1: Add failing authorization and WebSocket stream tests**
+- [x] **Step 1: Add failing authorization and WebSocket stream tests**
 
 Assert `subscribeProviderUsageLimits` requires `AuthOrchestrationReadScope`. In the server test harness, assert a subscriber receives an immediate `{ version: 1, type: "snapshot", entries }`, followed by full snapshots from service changes, with no raw runtime payload fields.
 
-- [ ] **Step 2: Run focused tests and confirm failure**
+- [x] **Step 2: Run focused tests and confirm failure**
 
 Run: `vp test run apps/server/src/auth/RpcAuthorization.test.ts apps/server/src/server.test.ts`
 
 Expected: FAIL because the method has no scope, handler, or layer dependency.
 
-- [ ] **Step 3: Wire the live layer once into runtime dependencies**
+- [x] **Step 3: Wire the live layer once into runtime dependencies**
 
 Import `ProviderUsageLimitsLive` in `server.ts` and provide-merge it alongside provider runtime/registry services so the entire process and every remote client share one cache and one event subscription. A server process is one environment; the client keeps this stream environment-scoped because its connection registry can attach to multiple server processes.
 
-- [ ] **Step 4: Add the WebSocket handler**
+- [x] **Step 4: Add the WebSocket handler**
 
 Resolve the service in `makeWsRpcLayer` and implement:
 
@@ -371,6 +371,11 @@ Expected: PASS.
 Run: `vp run --filter t3 typecheck`
 
 Expected: PASS.
+
+The focused authorization and WebSocket integration tests pass, and a filtered compiler audit
+reports no diagnostics in the feature's server, adapter, authorization, or WebSocket files. The
+package-wide command still exits nonzero on unrelated pre-existing Effect diagnostics in legacy
+CLI/server test code.
 
 - [ ] **Step 6: Commit**
 

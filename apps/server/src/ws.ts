@@ -79,6 +79,7 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
+import * as ProviderUsageLimits from "./provider/Services/ProviderUsageLimits.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -366,6 +367,7 @@ const makeWsRpcLayer = (
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+      const providerUsageLimits = yield* ProviderUsageLimits.ProviderUsageLimits;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
@@ -2087,6 +2089,29 @@ const makeWsRpcLayer = (
             Stream.unwrap(
               Effect.map(backgroundPolicy.subscribe, ({ latest, changes }) =>
                 Stream.concat(Stream.make(latest), changes),
+              ),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscribeProviderUsageLimits]: (_input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.subscribeProviderUsageLimits,
+            providerUsageLimits.getSnapshots.pipe(
+              Effect.map((initialEntries) =>
+                Stream.concat(
+                  Stream.make({
+                    version: 1 as const,
+                    type: "snapshot" as const,
+                    entries: initialEntries,
+                  }),
+                  providerUsageLimits.streamChanges.pipe(
+                    Stream.map((entries) => ({
+                      version: 1 as const,
+                      type: "snapshot" as const,
+                      entries,
+                    })),
+                  ),
+                ).pipe(Stream.changesWith((previous, next) => previous.entries === next.entries)),
               ),
             ),
             { "rpc.aggregate": "server" },

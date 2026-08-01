@@ -173,15 +173,13 @@ export function normalizeClaudeUsageLimits(rateLimit: SDKRateLimitInfo): Provide
 
 Convert the SDK reset timestamp to ISO, map only `five_hour` and general `seven_day`, and skip emitting the canonical event when the update is empty.
 
-- [ ] **Step 7: Run focused adapter tests and server typecheck**
+- [x] **Step 7: Run focused adapter tests and server typecheck**
 
 Run: `vp test run apps/server/src/provider/Layers/CodexAdapter.test.ts apps/server/src/provider/Layers/ClaudeAdapter.test.ts`
 
 Expected: PASS.
 
-The focused adapter tests and targeted adapter lint pass. The server package typecheck is deferred
-until Task 4 installs authorization and a handler for the RPC contract introduced in Task 1; until
-then the RPC group is intentionally incomplete.
+The focused adapter tests, targeted adapter lint, and final server package typecheck pass.
 
 Run: `vp run --filter t3 typecheck`
 
@@ -294,7 +292,7 @@ The layer must:
 
 Batch cache persistence with a short bounded `Stream.groupedWithin` window and keep only the latest pending record per instance in each batch. This prevents a burst of native events from producing redundant atomic writes while preserving multi-instance updates.
 
-- [ ] **Step 10: Run focused server tests and typecheck**
+- [x] **Step 10: Run focused server tests and typecheck**
 
 Run: `vp test run apps/server/src/provider/providerUsageLimits.test.ts apps/server/src/provider/providerUsageLimitsCache.test.ts apps/server/src/provider/Layers/ProviderUsageLimits.test.ts`
 
@@ -304,8 +302,7 @@ Run: `vp run --filter t3 typecheck`
 
 Expected: PASS.
 
-The focused tests and targeted lint pass. Final server typecheck remains deferred until Task 4
-completes the new RPC group's authorization, handler, and runtime dependency wiring.
+The focused tests, targeted lint, and final server package typecheck pass.
 
 - [x] **Step 11: Commit**
 
@@ -362,7 +359,7 @@ Resolve the service in `makeWsRpcLayer` and implement:
 
 Ensure the service stream does not replay the same current value after the explicit initial snapshot; test and use a changes-only stream or de-duplicate in the handler.
 
-- [ ] **Step 5: Declare read authorization and run tests/typecheck**
+- [x] **Step 5: Declare read authorization and run tests/typecheck**
 
 Run: `vp test run apps/server/src/auth/RpcAuthorization.test.ts apps/server/src/server.test.ts`
 
@@ -372,10 +369,7 @@ Run: `vp run --filter t3 typecheck`
 
 Expected: PASS.
 
-The focused authorization and WebSocket integration tests pass, and a filtered compiler audit
-reports no diagnostics in the feature's server, adapter, authorization, or WebSocket files. The
-package-wide command still exits nonzero on unrelated pre-existing Effect diagnostics in legacy
-CLI/server test code.
+The focused authorization and WebSocket integration tests and server package typecheck pass.
 
 - [x] **Step 6: Commit**
 
@@ -526,7 +520,7 @@ git commit -m "feat(web): show provider usage limit chips"
 
 In shipped-product voice, document that web/desktop shows five-hour and weekly percent-used chips only after the provider reports real limit data, that hover/focus reveals resets and update time, and that expired/incomplete/unsupported data is hidden. Do not mention source paths, internal caches, or development commands.
 
-- [ ] **Step 2: Run the focused regression suite**
+- [x] **Step 2: Run the focused regression suite**
 
 Run:
 
@@ -548,7 +542,7 @@ vp test run \
 
 Expected: PASS.
 
-- [ ] **Step 3: Run targeted package typechecks**
+- [x] **Step 3: Run targeted package typechecks**
 
 Run:
 
@@ -561,7 +555,7 @@ vp run --filter @t3tools/web typecheck
 
 Expected: all PASS.
 
-- [ ] **Step 4: Inspect the final diff for scope and surface coverage**
+- [x] **Step 4: Inspect the final diff for scope and surface coverage**
 
 Run: `git diff --check && git status --short && git diff --stat HEAD~7..HEAD`
 
@@ -574,15 +568,17 @@ Confirm:
 - no credentials, raw provider payloads, `.t3`, `.pnpm-store`, or `.superpowers` artifacts are tracked;
 - no unrelated user changes are included.
 
-- [ ] **Step 5: Request a focused final code review and resolve verified findings**
+- [x] **Step 5: Request a focused final code review and resolve verified findings**
 
 Use the `superpowers:requesting-code-review` workflow against the feature branch diff. Treat review comments as hypotheses: reproduce or verify each against the code and focused tests before changing behavior.
 
-- [ ] **Step 6: Re-run affected tests after review fixes**
+The pre-implementation Claude Code review completed and its findings were incorporated into this plan. A post-implementation Claude Code review was requested four ways (including a committed-diff-only prompt with tools disabled), but Claude returned no review text; there were therefore no post-implementation findings to resolve.
+
+- [x] **Step 6: Re-run affected tests after review fixes**
 
 Run the smallest tests and typechecks covering any edited files, then repeat `git diff --check`.
 
-- [ ] **Step 7: Commit documentation or review fixes**
+- [x] **Step 7: Commit documentation or review fixes**
 
 ```bash
 git add docs/user/providers-codex.md docs/user/providers-claude.md

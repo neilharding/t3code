@@ -339,9 +339,9 @@ const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(OrchestrationLayerLive),
 );
 
-const ProviderRegistryAndUsageLimitsLive = Layer.empty.pipe(
-  Layer.provideMerge(ProviderRegistryLive),
-  Layer.provideMerge(ProviderUsageLimitsLive),
+const ProviderUsageLimitsLayerLive = ProviderUsageLimitsLive.pipe(
+  Layer.provide(ProviderRegistryLive),
+  Layer.provide(ProviderLayerLive),
 );
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
@@ -355,7 +355,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(Layer.mergeAll(TerminalLayerLive, PreviewLayerLive)),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(Keybindings.layer),
-  Layer.provideMerge(ProviderRegistryAndUsageLimitsLive),
+  Layer.provideMerge(Layer.mergeAll(ProviderRegistryLive, ProviderUsageLimitsLayerLive)),
   // The instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;

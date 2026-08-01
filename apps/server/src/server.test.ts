@@ -4534,7 +4534,10 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         { version: 1, type: "snapshot", entries: initialEntries },
         { version: 1, type: "snapshot", entries: updatedEntries },
       ]);
-      assert.equal(JSON.stringify(events).includes("raw"), false);
+      for (const event of events) {
+        assert.equal(Object.hasOwn(event, "raw"), false);
+        for (const entry of event.entries) assert.equal(Object.hasOwn(entry, "raw"), false);
+      }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

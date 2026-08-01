@@ -33,7 +33,7 @@
 - Modify: `packages/contracts/src/providerRuntime.test.ts`
 - Create: `packages/contracts/src/providerUsageLimits.test.ts`
 
-- [ ] **Step 1: Write failing schema tests for public snapshots and canonical sparse updates**
+- [x] **Step 1: Write failing schema tests for public snapshots and canonical sparse updates**
 
 Add tests that decode a complete snapshot and a one-window update, and reject a percentage outside `0..100`, a non-ISO reset timestamp, and a snapshot missing one display window.
 
@@ -67,13 +67,13 @@ export const ProviderUsageLimitsStreamEvent = Schema.Struct({
 });
 ```
 
-- [ ] **Step 2: Run the contract tests and confirm the missing-contract failure**
+- [x] **Step 2: Run the contract tests and confirm the missing-contract failure**
 
 Run: `vp test run packages/contracts/src/providerUsageLimits.test.ts packages/contracts/src/providerRuntime.test.ts`
 
 Expected: FAIL because `providerUsageLimits.ts` and the typed runtime payload do not exist.
 
-- [ ] **Step 3: Implement and export the schemas**
+- [x] **Step 3: Implement and export the schemas**
 
 Create `providerUsageLimits.ts`, export it from `index.ts`, and replace `AccountRateLimitsUpdatedPayload.rateLimits: Schema.Unknown` with:
 
@@ -85,11 +85,11 @@ const AccountRateLimitsUpdatedPayload = Schema.Struct({
 
 Keep the canonical event type name `account.rate-limits.updated`; only its payload becomes normalized and typed.
 
-- [ ] **Step 4: Add the dedicated stream RPC contract and authorization-visible method**
+- [x] **Step 4: Add the dedicated stream RPC contract and authorization-visible method**
 
 Add `WS_METHODS.subscribeProviderUsageLimits = "subscribeProviderUsageLimits"`, define `WsSubscribeProviderUsageLimitsRpc` with an empty payload, `ProviderUsageLimitsStreamEvent` success, `EnvironmentAuthorizationError`, and `stream: true`, then include it in `WsRpcGroup`.
 
-- [ ] **Step 5: Run focused tests and typecheck**
+- [x] **Step 5: Run focused tests and typecheck**
 
 Run: `vp test run packages/contracts/src/providerUsageLimits.test.ts packages/contracts/src/providerRuntime.test.ts`
 

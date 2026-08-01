@@ -4,6 +4,8 @@ import {
   type ServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleWelcomePayload,
+  type ProviderUsageLimitsSnapshot,
+  type ProviderUsageLimitsStreamEvent,
   type ServerProvider,
   type ServerSettings,
 } from "@t3tools/contracts";
@@ -34,6 +36,7 @@ interface PrimaryServerState {
 
 const EMPTY_AVAILABLE_EDITORS: ReadonlyArray<EditorId> = [];
 const EMPTY_SERVER_PROVIDERS: ReadonlyArray<ServerProvider> = [];
+const EMPTY_PROVIDER_USAGE_LIMITS: ReadonlyArray<ProviderUsageLimitsSnapshot> = [];
 const EMPTY_PRIMARY_SERVER_STATE: PrimaryServerState = {
   config: null,
   latestEvent: null,
@@ -79,6 +82,26 @@ export const primaryServerProvidersAtom = Atom.make(
   (get): ReadonlyArray<ServerProvider> =>
     get(primaryServerConfigAtom)?.providers ?? EMPTY_SERVER_PROVIDERS,
 ).pipe(Atom.withLabel("web-primary-server-providers"));
+
+export function providerUsageLimitsFromStreamResult(
+  result: AsyncResult.AsyncResult<ProviderUsageLimitsStreamEvent, unknown>,
+): ReadonlyArray<ProviderUsageLimitsSnapshot> {
+  return Option.match(AsyncResult.value(result), {
+    onNone: () => EMPTY_PROVIDER_USAGE_LIMITS,
+    onSome: (event) => event.entries,
+  });
+}
+
+export const primaryProviderUsageLimitsAtom = Atom.make(
+  (get): ReadonlyArray<ProviderUsageLimitsSnapshot> => {
+    const environmentId = get(primaryEnvironmentIdAtom);
+    return environmentId === null
+      ? EMPTY_PROVIDER_USAGE_LIMITS
+      : providerUsageLimitsFromStreamResult(
+          get(serverEnvironment.usageLimits({ environmentId, input: {} })),
+        );
+  },
+).pipe(Atom.withLabel("web-primary-provider-usage-limits"));
 
 export const primaryServerKeybindingsAtom = Atom.make(
   (get): ServerConfig["keybindings"] =>

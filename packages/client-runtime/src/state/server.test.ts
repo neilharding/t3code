@@ -13,6 +13,8 @@ import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
+import * as Layer from "effect/Layer";
+import { Atom } from "effect/unstable/reactivity";
 import { RpcClientError } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 
@@ -34,7 +36,10 @@ import {
   resolveServerUpdateProgressResult,
   serverUpdateStateForProgressEvent,
   serverUpdateStateForServerVersion,
+  createServerEnvironmentAtoms,
 } from "./server.ts";
+import type { EnvironmentRegistry } from "../connection/registry.ts";
+import type { EnvironmentCacheStore } from "../platform/persistence.ts";
 
 const CONFIG = {
   availableEditors: [],
@@ -70,6 +75,21 @@ function session(client: WsRpcProtocolClient): RpcSession {
 }
 
 describe("server state projection", () => {
+  it("keys provider usage-limit subscriptions by environment", () => {
+    const runtime = Atom.runtime(Layer.empty) as unknown as Atom.AtomRuntime<
+      EnvironmentRegistry | EnvironmentCacheStore,
+      never
+    >;
+    const atoms = createServerEnvironmentAtoms(runtime, {
+      initialConfigValueAtom: () => Atom.make<ServerConfig | null>(null),
+    });
+    const first = { environmentId: EnvironmentId.make("environment-1"), input: {} };
+    const second = { environmentId: EnvironmentId.make("environment-2"), input: {} };
+
+    expect(atoms.usageLimits(first)).toBe(atoms.usageLimits({ ...first }));
+    expect(atoms.usageLimits(first)).not.toBe(atoms.usageLimits(second));
+  });
+
   it("only treats a legacy transport interruption as an unacknowledged handoff", () => {
     expect(isLegacyUpdateHandoffLoss(Cause.interrupt(1))).toBe(true);
     expect(

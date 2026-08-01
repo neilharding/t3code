@@ -625,6 +625,10 @@ export function createServerEnvironmentAtoms<R, E>(
       tag: WS_METHODS.subscribeResourceTelemetry,
       idleTtlMs: 0,
     }),
+    usageLimits: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:provider-usage-limits",
+      tag: WS_METHODS.subscribeProviderUsageLimits,
+    }),
     resourceTelemetryHistory: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:resource-telemetry-history",
       tag: WS_METHODS.serverGetResourceTelemetryHistory,

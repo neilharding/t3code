@@ -377,7 +377,7 @@ reports no diagnostics in the feature's server, adapter, authorization, or WebSo
 package-wide command still exits nonzero on unrelated pre-existing Effect diagnostics in legacy
 CLI/server test code.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/server/src/server.ts apps/server/src/ws.ts apps/server/src/auth/RpcAuthorization.ts apps/server/src/auth/RpcAuthorization.test.ts apps/server/src/server.test.ts
@@ -393,17 +393,17 @@ git commit -m "feat(server): stream provider usage limits"
 - Modify: `apps/web/src/state/server.ts`
 - Create: `apps/web/src/state/server.test.ts`
 
-- [ ] **Step 1: Add failing client-runtime subscription tests**
+- [x] **Step 1: Add failing client-runtime subscription tests**
 
 Extend the environment RPC test layer with `subscribeProviderUsageLimits`. Assert the returned atom family subscribes with the target environment id, retains only the latest full event, and isolates two environment ids.
 
-- [ ] **Step 2: Run the client-runtime test and confirm failure**
+- [x] **Step 2: Run the client-runtime test and confirm failure**
 
 Run: `vp test run packages/client-runtime/src/state/server.test.ts`
 
 Expected: FAIL because `serverEnvironment.usageLimits` does not exist.
 
-- [ ] **Step 3: Add the subscription atom family**
+- [x] **Step 3: Add the subscription atom family**
 
 In `createServerEnvironmentAtoms`, return:
 
@@ -416,21 +416,21 @@ usageLimits: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
 
 Use no client persistence; the server-owned cache supplies startup snapshots.
 
-- [ ] **Step 4: Add a failing web-state projection test**
+- [x] **Step 4: Add a failing web-state projection test**
 
 Test a pure helper that resolves `ReadonlyArray<ProviderUsageLimitsSnapshot>` from the latest event and returns the shared empty constant for null/failure/pending state.
 
-- [ ] **Step 5: Run the web-state test and confirm failure**
+- [x] **Step 5: Run the web-state test and confirm failure**
 
 Run: `vp test run apps/web/src/state/server.test.ts`
 
 Expected: FAIL because the primary usage-limit atom/helper does not exist.
 
-- [ ] **Step 6: Implement the primary-environment atom**
+- [x] **Step 6: Implement the primary-environment atom**
 
 Add `primaryProviderUsageLimitsAtom` in `apps/web/src/state/server.ts`. It reads `primaryEnvironmentIdAtom`, then the latest `serverEnvironment.usageLimits({ environmentId, input: {} })` event via `AsyncResult.value`, and returns `event.entries` or the module-level empty array.
 
-- [ ] **Step 7: Run focused tests and typechecks**
+- [x] **Step 7: Run focused tests and typechecks**
 
 Run: `vp test run packages/client-runtime/src/state/server.test.ts apps/web/src/state/server.test.ts`
 

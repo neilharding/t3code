@@ -89,7 +89,7 @@ describe("parseClaudeUsagePanel", () => {
     });
   });
 
-  it("resolves a time-only reset with its displayed timezone suffix", () => {
+  it("omits a time-only reset even with its displayed timezone suffix", () => {
     expect(
       parseClaudeUsagePanel(
         [
@@ -103,9 +103,28 @@ describe("parseClaudeUsagePanel", () => {
         nowEpochMs,
       ),
     ).toEqual({
-      fiveHour: { usedPercent: 24.5, resetsAt: new Date(2026, 7, 1, 16, 15).toISOString() },
       weekly: { usedPercent: 42, resetsAt: new Date(2026, 10, 5, 16, 15).toISOString() },
     });
+  });
+
+  it("omits reset rows that would require rolling an undated value forward", () => {
+    const weekly = { usedPercent: 42, resetsAt: new Date(2026, 7, 5, 16, 15).toISOString() };
+
+    for (const reset of ["Saturday at 10:30 AM", "Jul 5 at 4:15 PM"]) {
+      expect(
+        parseClaudeUsagePanel(
+          [
+            "Current session",
+            "  24.5% used",
+            `  Resets ${reset}`,
+            "Current week (all models)",
+            "  42% used",
+            "  Resets Aug 5 at 4:15 PM",
+          ].join("\n"),
+          nowEpochMs,
+        ),
+      ).toEqual({ weekly });
+    }
   });
 
   it("omits only rows with invalid percentages or non-future resets", () => {

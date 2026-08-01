@@ -137,19 +137,14 @@ const resolvePanelReset = (line: string, nowEpochMs: number): string | undefined
       /^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM)?)$/iu.exec(
         description,
       );
-    const clockTime = parseClockTime(timeAtEnd ? timeAtEnd[2] : description);
+    if (!timeAtEnd) return undefined;
+    const clockTime = parseClockTime(timeAtEnd[2]);
     if (!clockTime) return undefined;
     const now = new Date(nowEpochMs);
-    if (!timeAtEnd) {
-      const candidate = new Date(nowEpochMs);
-      candidate.setHours(clockTime.hours, clockTime.minutes, 0, 0);
-      if (candidate.getTime() <= nowEpochMs) candidate.setDate(candidate.getDate() + 1);
-      resetEpochMs = candidate.getTime();
-    }
-    const dateDescription = timeAtEnd?.[1]?.trim();
-    const weekday = dateDescription
-      ? /^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)$/iu.exec(dateDescription)
-      : undefined;
+    const dateDescription = timeAtEnd[1].trim();
+    const weekday = /^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)$/iu.exec(
+      dateDescription,
+    );
     const calendarDate =
       /^(January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\s+(\d{1,2})(?:,?\s+(\d{4}))?$/iu.exec(
         dateDescription ?? "",
@@ -167,7 +162,7 @@ const resolvePanelReset = (line: string, nowEpochMs: number): string | undefined
       const candidate = new Date(nowEpochMs);
       candidate.setHours(clockTime.hours, clockTime.minutes, 0, 0);
       candidate.setDate(candidate.getDate() + ((weekdayIndex - candidate.getDay() + 7) % 7));
-      if (candidate.getTime() <= nowEpochMs) candidate.setDate(candidate.getDate() + 7);
+      if (candidate.getTime() <= nowEpochMs) return undefined;
       resetEpochMs = candidate.getTime();
     } else if (calendarDate) {
       const monthIndex = new Date(`${calendarDate[1]} 1, 2000`).getMonth();
@@ -187,9 +182,7 @@ const resolvePanelReset = (line: string, nowEpochMs: number): string | undefined
       ) {
         return undefined;
       }
-      if (providedYear === undefined && candidate.getTime() <= nowEpochMs) {
-        candidate.setFullYear(candidate.getFullYear() + 1);
-      }
+      if (providedYear === undefined && candidate.getTime() <= nowEpochMs) return undefined;
       resetEpochMs = candidate.getTime();
     }
   }

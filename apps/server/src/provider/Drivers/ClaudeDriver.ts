@@ -55,6 +55,7 @@ import {
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
 import { makeClaudeCapabilitiesCacheKey, makeClaudeContinuationGroupKey } from "./ClaudeHome.ts";
+import { readClaudeUsageLimits } from "./ClaudeUsageLimits.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("claudeAgent");
@@ -216,6 +217,15 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
         snapshot,
         adapter,
         textGeneration,
+        readUsageLimits: readClaudeUsageLimits({
+          config: effectiveConfig,
+          environment: processEnv,
+          childProcessSpawner: spawner,
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(HttpClient.HttpClient, httpClient),
+          Effect.provideService(Path.Path, path),
+        ),
       } satisfies ProviderInstance;
     }),
 };

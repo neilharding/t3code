@@ -99,9 +99,9 @@ five-hour and weekly limits. The chip shows percent used for the five-hour windo
 percent used for the week. Its dot uses the provider's accent color when one is configured.
 
 Hover over the chip, or focus it with the keyboard, to see both usage meters, their reset times, and
-when the data was last updated. T3 Code hides the chip when Codex has not reported complete current
-limit data, when either window has expired, or when that provider instance is unavailable or signed
-out.
+when the data was last updated. While T3 Code is waiting for a complete current snapshot, the chip
+stays visible as `5h — | wk —`. Disabled, unavailable, or signed-out provider instances remain
+hidden.
 
 ## I Need A Different API Key Or Endpoint
 

@@ -25,6 +25,7 @@ import type {
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
+  ProviderUsageLimitsUpdate,
 } from "@t3tools/contracts";
 import type * as Effect from "effect/Effect";
 import type * as Schema from "effect/Schema";
@@ -71,6 +72,12 @@ export interface ProviderInstance {
   readonly snapshot: ServerProviderShape;
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
+  /**
+   * Reads a provider-owned quota snapshot without starting a user session.
+   * The closure may use local credential storage but must never expose it to
+   * clients, logs, or persistence.
+   */
+  readonly readUsageLimits?: Effect.Effect<ProviderUsageLimitsUpdate | undefined>;
 }
 
 export interface ProviderContinuationIdentity {

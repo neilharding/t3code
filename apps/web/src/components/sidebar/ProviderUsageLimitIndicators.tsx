@@ -18,16 +18,28 @@ const DEFAULT_COLORS = {
   claudeAgent: "#f97316",
 } as const;
 
-export interface ProviderUsageLimitIndicator {
+interface ProviderUsageLimitIndicatorBase {
   readonly providerInstanceId: ProviderInstanceId;
   readonly label: string;
   readonly color: string;
+}
+
+export interface ProviderUsageLimitIndicatorPending extends ProviderUsageLimitIndicatorBase {
+  readonly state: "pending";
+}
+
+export interface ProviderUsageLimitIndicatorReady extends ProviderUsageLimitIndicatorBase {
+  readonly state: "ready";
   readonly fiveHourPercent: number;
   readonly weeklyPercent: number;
   readonly fiveHourResetLabel: string;
   readonly weeklyResetLabel: string;
   readonly updatedLabel: string;
 }
+
+export type ProviderUsageLimitIndicator =
+  | ProviderUsageLimitIndicatorPending
+  | ProviderUsageLimitIndicatorReady;
 
 const isValidPercent = (value: number): boolean =>
   Number.isFinite(value) && value >= 0 && value <= 100;
@@ -59,44 +71,52 @@ export function buildProviderUsageLimitIndicators(
   nowEpochMs: number,
 ): ReadonlyArray<ProviderUsageLimitIndicator> {
   const limitsByInstance = new Map(limits.map((entry) => [entry.providerInstanceId, entry]));
-  return deriveProviderInstanceEntries(providers).flatMap((provider) => {
-    const snapshot = provider.snapshot;
-    if (
-      (provider.driverKind !== "codex" && provider.driverKind !== "claudeAgent") ||
-      !provider.enabled ||
-      !provider.installed ||
-      !provider.isAvailable ||
-      snapshot.auth.status !== "authenticated"
-    ) {
-      return [];
-    }
-    const usage = limitsByInstance.get(provider.instanceId);
-    if (
-      usage === undefined ||
-      usage.driver !== provider.driverKind ||
-      !isValidPercent(usage.fiveHour.usedPercent) ||
-      !isValidPercent(usage.weekly.usedPercent)
-    ) {
-      return [];
-    }
-    const fiveHourResetLabel = formatFutureDuration(usage.fiveHour.resetsAt, nowEpochMs);
-    const weeklyResetLabel = formatFutureDuration(usage.weekly.resetsAt, nowEpochMs);
-    if (fiveHourResetLabel === null || weeklyResetLabel === null) return [];
-    return [
-      {
+  return deriveProviderInstanceEntries(providers).flatMap<ProviderUsageLimitIndicator>(
+    (provider) => {
+      const snapshot = provider.snapshot;
+      if (
+        (provider.driverKind !== "codex" && provider.driverKind !== "claudeAgent") ||
+        !provider.enabled ||
+        !provider.installed ||
+        !provider.isAvailable ||
+        snapshot.auth.status !== "authenticated"
+      ) {
+        return [];
+      }
+      const usage = limitsByInstance.get(provider.instanceId);
+      const base = {
         providerInstanceId: provider.instanceId,
         label: provider.displayName,
         color:
           normalizeProviderAccentColor(provider.accentColor) ??
           (provider.driverKind === "codex" ? DEFAULT_COLORS.codex : DEFAULT_COLORS.claudeAgent),
-        fiveHourPercent: Math.round(usage.fiveHour.usedPercent),
-        weeklyPercent: Math.round(usage.weekly.usedPercent),
-        fiveHourResetLabel,
-        weeklyResetLabel,
-        updatedLabel: formatUpdatedAge(usage.observedAt, nowEpochMs),
-      },
-    ];
-  });
+      } as const;
+      if (
+        usage === undefined ||
+        usage.driver !== provider.driverKind ||
+        !isValidPercent(usage.fiveHour.usedPercent) ||
+        !isValidPercent(usage.weekly.usedPercent)
+      ) {
+        return [{ ...base, state: "pending" as const }];
+      }
+      const fiveHourResetLabel = formatFutureDuration(usage.fiveHour.resetsAt, nowEpochMs);
+      const weeklyResetLabel = formatFutureDuration(usage.weekly.resetsAt, nowEpochMs);
+      if (fiveHourResetLabel === null || weeklyResetLabel === null) {
+        return [{ ...base, state: "pending" as const }];
+      }
+      return [
+        {
+          ...base,
+          state: "ready" as const,
+          fiveHourPercent: Math.round(usage.fiveHour.usedPercent),
+          weeklyPercent: Math.round(usage.weekly.usedPercent),
+          fiveHourResetLabel,
+          weeklyResetLabel,
+          updatedLabel: formatUpdatedAge(usage.observedAt, nowEpochMs),
+        },
+      ];
+    },
+  );
 }
 
 function UsageMeter(props: {
@@ -130,7 +150,7 @@ function UsageMeter(props: {
 }
 
 export function ProviderUsageLimitDetail(props: {
-  readonly indicator: ProviderUsageLimitIndicator;
+  readonly indicator: ProviderUsageLimitIndicatorReady;
 }) {
   const { indicator } = props;
   return (
@@ -162,6 +182,24 @@ export function ProviderUsageLimitDetail(props: {
   );
 }
 
+export function ProviderUsageLimitPendingDetail(props: {
+  readonly indicator: ProviderUsageLimitIndicatorPending;
+}) {
+  return (
+    <div className="w-52 space-y-2 py-1.5">
+      <div className="flex items-center gap-2">
+        <span
+          aria-hidden
+          className="size-2 rounded-full"
+          style={{ backgroundColor: props.indicator.color }}
+        />
+        <span className="truncate text-sm font-semibold">{props.indicator.label}</span>
+      </div>
+      <p className="text-xs text-muted-foreground">Waiting for usage data from this provider.</p>
+    </div>
+  );
+}
+
 export const ProviderUsageLimitIndicatorsView = memo(
   function ProviderUsageLimitIndicatorsView(props: {
     readonly indicators: ReadonlyArray<ProviderUsageLimitIndicator>;
@@ -176,20 +214,30 @@ export const ProviderUsageLimitIndicatorsView = memo(
                 render={
                   <button
                     type="button"
-                    aria-label={`${indicator.label} usage: 5 hour ${indicator.fiveHourPercent}% used, week ${indicator.weeklyPercent}% used`}
+                    aria-label={
+                      indicator.state === "ready"
+                        ? `${indicator.label} usage: 5 hour ${indicator.fiveHourPercent}% used, week ${indicator.weeklyPercent}% used`
+                        : `${indicator.label} usage: waiting for real usage data`
+                    }
                     className="flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-md border border-sidebar-border/70 bg-sidebar-control-surface px-2 text-[11px] font-medium tabular-nums text-sidebar-foreground hover:bg-sidebar-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                   />
                 }
               >
                 <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={dotStyle} />
-                <span>5h {indicator.fiveHourPercent}%</span>
+                <span>
+                  5h {indicator.state === "ready" ? `${indicator.fiveHourPercent}%` : "—"}
+                </span>
                 <span aria-hidden className="text-sidebar-muted-foreground/50">
                   |
                 </span>
-                <span>wk {indicator.weeklyPercent}%</span>
+                <span>wk {indicator.state === "ready" ? `${indicator.weeklyPercent}%` : "—"}</span>
               </TooltipTrigger>
               <TooltipPopup side="right" align="start" sideOffset={8} className="px-2 py-1">
-                <ProviderUsageLimitDetail indicator={indicator} />
+                {indicator.state === "ready" ? (
+                  <ProviderUsageLimitDetail indicator={indicator} />
+                ) : (
+                  <ProviderUsageLimitPendingDetail indicator={indicator} />
+                )}
               </TooltipPopup>
             </Tooltip>
           );

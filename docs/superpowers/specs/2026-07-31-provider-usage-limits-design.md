@@ -137,6 +137,25 @@ One server process represents one environment and owns one usage service. Client
 - Stream or connection failure follows existing environment synchronization behavior; the client does not manufacture new values.
 - A cached but unexpired snapshot is labeled by its real age in the popover.
 
+## Approved amendment — 2026-08-01
+
+The initial implementation revealed that Claude Code does not reliably emit a
+`rate_limit_event` during an ordinary session. Runtime telemetry remains a
+low-latency update path, but it cannot be the only source of truth.
+
+Eligible Codex and Claude Code instances now retain their compact chip even
+before a complete real snapshot exists. The chip uses `5h — | wk —` and its
+popover explains that T3 Code is waiting for real usage data. It never
+invented an estimate, displays no meter, reset time, or age, and remains hidden
+for disabled, unavailable, unauthenticated, or unsupported providers.
+
+The server refreshes real usage through provider-owned authenticated paths. It
+must use the configured Codex or Claude credential context only, keep tokens
+server-side, avoid cookie scraping and keychain prompts, and log only
+non-sensitive structural failures. There is no fixed polling loop: refreshes
+occur during service startup and at provider lifecycle boundaries, while native
+runtime updates still merge immediately.
+
 ## Testing
 
 Add focused tests for:

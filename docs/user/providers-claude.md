@@ -86,14 +86,15 @@ blurred by default; click the blurred email to reveal it.
 
 ## Usage Limits In The Sidebar
 
-On web and desktop, T3 Code shows a compact usage chip above Search after Claude Code reports both
-its five-hour and general weekly limits. The chip shows percent used for the five-hour window first,
-followed by percent used for the week. Its dot uses the provider's accent color when one is
-configured.
+On web and desktop, authenticated Claude Code providers show a compact chip above Search. It shows
+five-hour percent used first, followed by the week. While T3 Code is waiting for an authenticated
+Claude usage response, the chip shows `5h — | wk —` instead of disappearing.
 
-Hover over the chip, or focus it with the keyboard, to see both usage meters, their reset times, and
-when the data was last updated. T3 Code hides model-specific weekly limits and any chip whose data is
-incomplete, expired, unavailable, or signed out.
+Hover over the chip, or focus it with the keyboard, to see the current meters, reset times, and
+when the data was last updated. T3 Code reads Claude's existing local OAuth credential context and
+requests its usage snapshot without starting a Claude session. Credentials remain on the server and
+are never sent to the app. Model-specific weekly limits and disabled, unavailable, or signed-out
+providers remain hidden.
 
 ## Can I Switch Claude Accounts In An Existing Thread?
 

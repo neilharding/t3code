@@ -21,6 +21,7 @@ import * as TestClock from "effect/testing/TestClock";
 
 import { ServerConfig } from "../../config.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
+import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderService, type ProviderServiceShape } from "../Services/ProviderService.ts";
 import { ProviderUsageLimits } from "../Services/ProviderUsageLimits.ts";
 import {
@@ -75,6 +76,13 @@ const makeTestLayer = (
       Layer.mergeAll(
         Layer.succeed(ProviderService, providerService),
         Layer.succeed(ProviderRegistry, providerRegistry),
+        Layer.succeed(ProviderInstanceRegistry, {
+          getInstance: () => Effect.succeed(undefined),
+          listInstances: Effect.succeed([]),
+          listUnavailable: Effect.succeed([]),
+          streamChanges: Stream.empty,
+          subscribeChanges: unsupported(),
+        }),
         Layer.succeed(ServerConfig, config),
       ),
     ),

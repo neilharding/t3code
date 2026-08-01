@@ -11,6 +11,7 @@ import {
   buildProviderUsageLimitIndicators,
   ProviderUsageLimitDetail,
   ProviderUsageLimitIndicatorsView,
+  ProviderUsageLimitPendingDetail,
 } from "./ProviderUsageLimitIndicators";
 
 const NOW = Date.parse("2026-07-31T12:00:00.000Z");
@@ -70,6 +71,7 @@ describe("buildProviderUsageLimitIndicators", () => {
       codexId,
     ]);
     expect(indicators[0]).toMatchObject({
+      state: "ready",
       color: "#123456",
       fiveHourPercent: 20,
       weeklyPercent: 61,
@@ -78,7 +80,6 @@ describe("buildProviderUsageLimitIndicators", () => {
   });
 
   it.each([
-    ["driver mismatch", makeProvider(codexId, claude)],
     ["disabled", makeProvider(codexId, codex, { enabled: false })],
     ["not installed", makeProvider(codexId, codex, { installed: false })],
     ["unavailable", makeProvider(codexId, codex, { availability: "unavailable" })],
@@ -89,7 +90,7 @@ describe("buildProviderUsageLimitIndicators", () => {
     ).toEqual([]);
   });
 
-  it("hides incomplete, expired, unsupported, and out-of-range data", () => {
+  it("keeps eligible instances visible while real usage is unavailable", () => {
     expect(
       buildProviderUsageLimitIndicators(
         [
@@ -100,7 +101,7 @@ describe("buildProviderUsageLimitIndicators", () => {
         [makeProvider(codexId, codex)],
         NOW,
       ),
-    ).toEqual([]);
+    ).toMatchObject([{ providerInstanceId: codexId, state: "pending" }]);
     expect(
       buildProviderUsageLimitIndicators(
         [
@@ -111,7 +112,13 @@ describe("buildProviderUsageLimitIndicators", () => {
         [makeProvider(codexId, codex)],
         NOW,
       ),
-    ).toEqual([]);
+    ).toMatchObject([{ providerInstanceId: codexId, state: "pending" }]);
+  });
+
+  it("shows a pending indicator when an eligible provider has no snapshot", () => {
+    expect(
+      buildProviderUsageLimitIndicators([], [makeProvider(claudeId, claude)], NOW),
+    ).toMatchObject([{ providerInstanceId: claudeId, state: "pending", color: "#f97316" }]);
   });
 });
 
@@ -135,7 +142,23 @@ describe("ProviderUsageLimitIndicatorsView", () => {
     expect(markup).toContain('aria-label="Codex Personal usage: 5 hour 20% used, week 61% used"');
   });
 
+  it("renders the real-data waiting state without meters or made-up percentages", () => {
+    const pending = buildProviderUsageLimitIndicators([], [makeProvider(codexId, codex)], NOW)[0]!;
+    if (pending.state !== "pending") throw new Error("expected a pending usage indicator");
+    const markup = renderToStaticMarkup(
+      <ProviderUsageLimitIndicatorsView indicators={[pending]} />,
+    );
+    const detail = renderToStaticMarkup(<ProviderUsageLimitPendingDetail indicator={pending} />);
+
+    expect(markup).toContain("5h —");
+    expect(markup).toContain("wk —");
+    expect(detail).toContain("Waiting for usage data from this provider.");
+    expect(markup).not.toContain('role="meter"');
+    expect(markup).toContain('aria-label="Codex Personal usage: waiting for real usage data"');
+  });
+
   it("renders detail meters, reset labels, and updated age", () => {
+    if (indicator.state !== "ready") throw new Error("expected a ready usage indicator");
     const markup = renderToStaticMarkup(<ProviderUsageLimitDetail indicator={indicator} />);
     expect(markup).toContain("Codex Personal");
     expect(markup.match(/role="meter"/gu)).toHaveLength(2);

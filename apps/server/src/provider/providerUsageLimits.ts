@@ -77,7 +77,7 @@ export const mergeProviderUsageLimitsRecord = (
   );
 };
 
-const isEligibleProvider = (provider: ServerProvider): boolean =>
+export const isEligibleProviderUsageLimitsProvider = (provider: ServerProvider): boolean =>
   isSupportedUsageLimitsDriver(provider.driver) &&
   provider.enabled &&
   provider.installed &&
@@ -90,7 +90,7 @@ export const pruneIneligibleProviderUsageLimitsRecords = (
 ): ReadonlyMap<ProviderInstanceId, ProviderUsageLimitsRecord> => {
   const eligibleProviders = new Map(
     providers
-      .filter(isEligibleProvider)
+      .filter(isEligibleProviderUsageLimitsProvider)
       .map((provider) => [provider.instanceId, provider.driver] as const),
   );
   return new Map(
@@ -106,7 +106,7 @@ export const projectProviderUsageLimitSnapshots = (
   nowEpochMs: number,
 ): ReadonlyArray<ProviderUsageLimitsSnapshot> =>
   providers.flatMap((provider) => {
-    if (!isEligibleProvider(provider)) {
+    if (!isEligibleProviderUsageLimitsProvider(provider)) {
       return [];
     }
     const record = records.get(provider.instanceId);

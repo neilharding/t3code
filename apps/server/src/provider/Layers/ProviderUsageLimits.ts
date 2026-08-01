@@ -1,4 +1,9 @@
-import { type ProviderInstanceId, type ProviderUsageLimitsSnapshot } from "@t3tools/contracts";
+import {
+  type ProviderDriverKind,
+  type ProviderInstanceId,
+  type ProviderUsageLimitsSnapshot,
+  type ProviderUsageLimitsUpdate,
+} from "@t3tools/contracts";
 import { causeErrorTag } from "@t3tools/shared/observability";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -15,6 +20,7 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 import { ServerConfig } from "../../config.ts";
 import {
   mergeProviderUsageLimitsRecord,
+  isEligibleProviderUsageLimitsProvider,
   projectProviderUsageLimitSnapshots,
   pruneExpiredProviderUsageLimitsRecord,
   pruneIneligibleProviderUsageLimitsRecords,
@@ -26,6 +32,7 @@ import {
   writeProviderUsageLimitsCache,
 } from "../providerUsageLimitsCache.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
+import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
 import { ProviderService } from "../Services/ProviderService.ts";
 import { ProviderUsageLimits } from "../Services/ProviderUsageLimits.ts";
 
@@ -74,6 +81,7 @@ const makeProviderUsageLimits = Effect.fn("makeProviderUsageLimits")(function* (
   const fileSystem = yield* FileSystem.FileSystem;
   const providerService = yield* ProviderService;
   const providerRegistry = yield* ProviderRegistry;
+  const providerInstanceRegistry = yield* ProviderInstanceRegistry;
   const providers = yield* providerRegistry.getProviders;
   const now = DateTime.toEpochMillis(yield* DateTime.now);
 
@@ -189,38 +197,90 @@ const makeProviderUsageLimits = Effect.fn("makeProviderUsageLimits")(function* (
     Effect.forkScoped,
   );
 
+  const applyUsageLimits = Effect.fn("ProviderUsageLimits.applyUsageLimits")(function* (input: {
+    readonly providerInstanceId: ProviderInstanceId;
+    readonly driver: ProviderDriverKind;
+    readonly observedAt: string;
+    readonly limits: ProviderUsageLimitsUpdate;
+  }) {
+    return yield* updateSemaphore.withPermits(1)(
+      Effect.gen(function* () {
+        const currentNow = DateTime.toEpochMillis(yield* DateTime.now);
+        const previous = yield* SubscriptionRef.get(recordsRef);
+        const currentProviders = yield* Ref.get(providersRef);
+        const correlatedProvider = currentProviders.find(
+          (provider) =>
+            provider.instanceId === input.providerInstanceId && provider.driver === input.driver,
+        );
+        if (correlatedProvider === undefined) return;
+        const merged = mergeProviderUsageLimitsRecord(previous.get(input.providerInstanceId), {
+          providerInstanceId: input.providerInstanceId,
+          driver: correlatedProvider.driver,
+          observedAt: input.observedAt,
+          limits: input.limits,
+          nowEpochMs: currentNow,
+        });
+        if (merged === undefined) return;
+        const next = new Map(previous).set(input.providerInstanceId, merged);
+        const eligible = pruneIneligibleProviderUsageLimitsRecords(next, currentProviders);
+        if (!eligible.has(input.providerInstanceId)) return;
+        yield* SubscriptionRef.set(recordsRef, eligible);
+        yield* enqueuePersistenceDiff(previous, eligible);
+        yield* publishProjection();
+      }),
+    );
+  });
+
+  const refreshUsageReader = Effect.fn("ProviderUsageLimits.refreshUsageReader")(function* (
+    providerInstanceId?: ProviderInstanceId,
+  ) {
+    const currentProviders = yield* Ref.get(providersRef);
+    const instances = yield* providerInstanceRegistry.listInstances;
+    yield* Effect.forEach(
+      instances,
+      (instance) =>
+        Effect.gen(function* () {
+          if (providerInstanceId !== undefined && instance.instanceId !== providerInstanceId)
+            return;
+          const provider = currentProviders.find(
+            (candidate) => candidate.instanceId === instance.instanceId,
+          );
+          if (
+            provider === undefined ||
+            provider.driver !== instance.driverKind ||
+            !isEligibleProviderUsageLimitsProvider(provider) ||
+            instance.readUsageLimits === undefined
+          ) {
+            return;
+          }
+          const limits = yield* instance.readUsageLimits;
+          if (limits === undefined) return;
+          const observedAt = DateTime.formatIso(yield* DateTime.now);
+          yield* applyUsageLimits({
+            providerInstanceId: instance.instanceId,
+            driver: instance.driverKind,
+            observedAt,
+            limits,
+          });
+        }),
+      { concurrency: "unbounded", discard: true },
+    );
+  });
+
   yield* providerService.streamEvents.pipe(
     Stream.runForEach((event) => {
+      if (event.type === "session.started" && event.providerInstanceId !== undefined) {
+        return refreshUsageReader(event.providerInstanceId).pipe(Effect.forkScoped, Effect.asVoid);
+      }
       if (event.type !== "account.rate-limits.updated" || event.providerInstanceId === undefined) {
         return Effect.void;
       }
-      const providerInstanceId = event.providerInstanceId;
-      return updateSemaphore.withPermits(1)(
-        Effect.gen(function* () {
-          const currentNow = DateTime.toEpochMillis(yield* DateTime.now);
-          const previous = yield* SubscriptionRef.get(recordsRef);
-          const merged = mergeProviderUsageLimitsRecord(previous.get(providerInstanceId), {
-            providerInstanceId,
-            driver: event.provider,
-            observedAt: event.createdAt,
-            limits: event.payload.limits,
-            nowEpochMs: currentNow,
-          });
-          if (merged === undefined) return;
-          const currentProviders = yield* Ref.get(providersRef);
-          const correlatedProvider = currentProviders.find(
-            (provider) =>
-              provider.instanceId === providerInstanceId && provider.driver === event.provider,
-          );
-          if (correlatedProvider === undefined) return;
-          const next = new Map(previous).set(providerInstanceId, merged);
-          const eligible = pruneIneligibleProviderUsageLimitsRecords(next, currentProviders);
-          if (!eligible.has(providerInstanceId)) return;
-          yield* SubscriptionRef.set(recordsRef, eligible);
-          yield* enqueuePersistenceDiff(previous, eligible);
-          yield* publishProjection();
-        }),
-      );
+      return applyUsageLimits({
+        providerInstanceId: event.providerInstanceId,
+        driver: event.provider,
+        observedAt: event.createdAt,
+        limits: event.payload.limits,
+      });
     }),
     Effect.forkScoped,
   );
@@ -257,6 +317,7 @@ const makeProviderUsageLimits = Effect.fn("makeProviderUsageLimits")(function* (
   );
 
   yield* Effect.yieldNow;
+  yield* refreshUsageReader();
 
   return ProviderUsageLimits.of({
     getSnapshots: SubscriptionRef.get(snapshotsRef),

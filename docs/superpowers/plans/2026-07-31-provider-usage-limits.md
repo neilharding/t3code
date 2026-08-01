@@ -444,7 +444,7 @@ Run: `vp run --filter @t3tools/web typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add packages/client-runtime/src/state/server.ts packages/client-runtime/src/state/server.test.ts apps/web/src/state/server.ts apps/web/src/state/server.test.ts
@@ -459,7 +459,7 @@ git commit -m "feat(client): subscribe to provider usage limits"
 - Create: `apps/web/src/components/sidebar/ProviderUsageLimitIndicators.test.tsx`
 - Modify: `apps/web/src/components/SidebarV2.tsx`
 
-- [ ] **Step 1: Add failing pure view-model tests**
+- [x] **Step 1: Add failing pure view-model tests**
 
 Export and test `buildProviderUsageLimitIndicators(limits, providers, nowEpochMs)`. It must:
 
@@ -471,7 +471,7 @@ Export and test `buildProviderUsageLimitIndicators(limits, providers, nowEpochMs
 - derive accessible provider/instance labels and reset/updated text;
 - return nothing if either reset has passed.
 
-- [ ] **Step 2: Add failing static markup tests for compact and detail content**
+- [x] **Step 2: Add failing static markup tests for compact and detail content**
 
 Render a presentation-only `ProviderUsageLimitIndicatorsView` with explicit props and assert:
 
@@ -481,23 +481,23 @@ Render a presentation-only `ProviderUsageLimitIndicatorsView` with explicit prop
 - detail content includes the instance display name, two mini meters, percent-used values, reset labels, and last-updated age;
 - the wrapper uses a compact two-column/wrapping layout and carries `group-data-[collapsible=icon]:hidden` so it disappears with the sidebar.
 
-- [ ] **Step 3: Run the component test and confirm failure**
+- [x] **Step 3: Run the component test and confirm failure**
 
 Run: `vp test run apps/web/src/components/sidebar/ProviderUsageLimitIndicators.test.tsx`
 
 Expected: FAIL because the component does not exist.
 
-- [ ] **Step 4: Implement the pure view model and memoized view**
+- [x] **Step 4: Implement the pure view model and memoized view**
 
 Use a `Tooltip`/`TooltipTrigger`/rich `TooltipPopup` per chip: Base UI supplies hover and keyboard-focus behavior without click state or custom timers. Use static `<div role="meter">` rails with inline width based on percent used and no animation. Default dots are stable palette values; valid `accentColor` overrides them.
 
 Keep `Date.now()` outside any interval. Recompute relative text only from new state or component render; the feature must not create a ticking render loop.
 
-- [ ] **Step 5: Connect the state and insert it directly above Search**
+- [x] **Step 5: Connect the state and insert it directly above Search**
 
 The stateful wrapper reads `primaryProviderUsageLimitsAtom` and `primaryServerProvidersAtom`, builds its view model with `useMemo`, and returns null for an empty list. Insert `<ProviderUsageLimitIndicators />` as the first child of the `SidebarV2` fixed `SidebarGroup`, immediately before the existing search/new-thread row.
 
-- [ ] **Step 6: Run focused web tests and typecheck**
+- [x] **Step 6: Run focused web tests and typecheck**
 
 Run: `vp test run apps/web/src/components/sidebar/ProviderUsageLimitIndicators.test.tsx`
 

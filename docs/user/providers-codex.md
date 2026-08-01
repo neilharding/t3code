@@ -92,6 +92,17 @@ click the blurred email to reveal it.
 
 Use display names and accent colors to make accounts easy to tell apart in the model picker.
 
+## Usage Limits In The Sidebar
+
+On web and desktop, T3 Code shows a compact usage chip above Search after Codex reports both its
+five-hour and weekly limits. The chip shows percent used for the five-hour window first, followed by
+percent used for the week. Its dot uses the provider's accent color when one is configured.
+
+Hover over the chip, or focus it with the keyboard, to see both usage meters, their reset times, and
+when the data was last updated. T3 Code hides the chip when Codex has not reported complete current
+limit data, when either window has expired, or when that provider instance is unavailable or signed
+out.
+
 ## I Need A Different API Key Or Endpoint
 
 Use the provider's Environment variables section in Settings.

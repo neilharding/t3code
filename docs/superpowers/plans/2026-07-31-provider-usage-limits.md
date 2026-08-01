@@ -507,7 +507,7 @@ Run: `vp run --filter @t3tools/web typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/web/src/components/sidebar/ProviderUsageLimitIndicators.tsx apps/web/src/components/sidebar/ProviderUsageLimitIndicators.test.tsx apps/web/src/components/SidebarV2.tsx
@@ -522,7 +522,7 @@ git commit -m "feat(web): show provider usage limit chips"
 - Modify: `docs/user/providers-claude.md`
 - Modify as findings require: files from Tasks 1–6
 
-- [ ] **Step 1: Document visible behavior and data availability**
+- [x] **Step 1: Document visible behavior and data availability**
 
 In shipped-product voice, document that web/desktop shows five-hour and weekly percent-used chips only after the provider reports real limit data, that hover/focus reveals resets and update time, and that expired/incomplete/unsupported data is hidden. Do not mention source paths, internal caches, or development commands.
 

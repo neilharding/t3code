@@ -84,6 +84,17 @@ CLAUDE_CONFIG_DIR path: ~/.claude_personal_home
 Use the email shown in Settings to confirm each provider is using the intended account. Emails are
 blurred by default; click the blurred email to reveal it.
 
+## Usage Limits In The Sidebar
+
+On web and desktop, T3 Code shows a compact usage chip above Search after Claude Code reports both
+its five-hour and general weekly limits. The chip shows percent used for the five-hour window first,
+followed by percent used for the week. Its dot uses the provider's accent color when one is
+configured.
+
+Hover over the chip, or focus it with the keyboard, to see both usage meters, their reset times, and
+when the data was last updated. T3 Code hides model-specific weekly limits and any chip whose data is
+incomplete, expired, unavailable, or signed out.
+
 ## Can I Switch Claude Accounts In An Existing Thread?
 
 Usually, no.

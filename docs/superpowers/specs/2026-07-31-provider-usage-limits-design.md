@@ -56,16 +56,24 @@ interface ProviderUsageLimitWindow {
   resetsAt: IsoDateTime;
 }
 
-interface ProviderUsageLimitsSnapshot {
+interface ProviderUsageLimitsUpdate {
   providerInstanceId: ProviderInstanceId;
   driver: ProviderDriverKind;
   observedAt: IsoDateTime;
   fiveHour?: ProviderUsageLimitWindow;
   weekly?: ProviderUsageLimitWindow;
 }
+
+interface ProviderUsageLimitsSnapshot {
+  providerInstanceId: ProviderInstanceId;
+  driver: ProviderDriverKind;
+  observedAt: IsoDateTime;
+  fiveHour: ProviderUsageLimitWindow;
+  weekly: ProviderUsageLimitWindow;
+}
 ```
 
-The wire stream carries an initial array snapshot followed by replacement updates. A replacement may contain one or both windows; the server service owns merging. Removal events identify a provider instance whose renderable snapshot no longer exists.
+Canonical provider events carry sparse `ProviderUsageLimitsUpdate` values, and the server service owns merging them. The wire stream always carries a complete array of currently renderable `ProviderUsageLimitsSnapshot` values. The first event is the current array; every later event replaces the whole array, so removals need no separate event and reconnect never depends on missed deltas.
 
 Contract schemas reject percentages outside `0..100`, invalid timestamps, and invalid provider identities. The UI only receives normalized data.
 
@@ -101,7 +109,7 @@ For every normalized event, the service:
 2. Merges the supplied window into the instance snapshot.
 3. Drops any window whose reset time has passed.
 4. Persists the resulting valid snapshot atomically.
-5. Publishes a replacement or removal update.
+5. Publishes a replacement full-array snapshot when the renderable projection changes.
 
 The service hydrates per-instance cache files during startup. Cached windows are accepted only when the cached instance and driver still match a configured provider and their reset times remain in the future. Disabled, unavailable, unauthenticated, removed, or mismatched instances are excluded immediately.
 
@@ -112,12 +120,12 @@ An instance is renderable only when both `fiveHour` and `weekly` are present and
 Expose a dedicated typed RPC subscription rather than attaching usage to the slower provider-status snapshot.
 
 - The initial subscription event contains all currently renderable snapshots.
-- Subsequent events replace or remove one provider instance.
+- Subsequent events replace the complete renderable array; an absent instance is removed.
 - Reconnect receives a fresh initial snapshot, so clients do not depend on missed deltas.
 - The shared client runtime owns environment-scoped usage state.
 - The web primary-environment atom selects the current environment's snapshots for the sidebar.
 
-This keeps local, remote/relay, tunnel, multi-device, and multi-environment behavior aligned with existing connection semantics.
+One server process represents one environment and owns one usage service. Client state remains keyed by environment because one web/desktop client can connect to multiple server processes. This keeps local, remote/relay, tunnel, multi-device, and multi-environment behavior aligned with existing connection semantics.
 
 ## Failure and stale-data behavior
 
@@ -139,7 +147,7 @@ Add focused tests for:
 - partial-window merging, multi-instance isolation, and driver correlation;
 - cache write/read, hydration, invalid cache rejection, and reset-time expiry;
 - provider disable/removal/auth transitions;
-- RPC initial snapshots, replacements, removals, and reconnect behavior;
+- RPC initial and replacement full-array snapshots, removals-by-absence, and reconnect behavior;
 - shared client-runtime environment scoping; and
 - sidebar chips, ordering/wrapping, percent-used labels, hidden incomplete data, hover popovers, and keyboard focus.
 

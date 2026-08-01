@@ -30,10 +30,10 @@ export interface ProviderUsageLimitIndicatorPending extends ProviderUsageLimitIn
 
 export interface ProviderUsageLimitIndicatorReady extends ProviderUsageLimitIndicatorBase {
   readonly state: "ready";
-  readonly fiveHourPercent: number;
-  readonly weeklyPercent: number;
-  readonly fiveHourResetLabel: string;
-  readonly weeklyResetLabel: string;
+  readonly fiveHourPercent?: number;
+  readonly weeklyPercent?: number;
+  readonly fiveHourResetLabel?: string;
+  readonly weeklyResetLabel?: string;
   readonly updatedLabel: string;
 }
 
@@ -91,27 +91,42 @@ export function buildProviderUsageLimitIndicators(
           normalizeProviderAccentColor(provider.accentColor) ??
           (provider.driverKind === "codex" ? DEFAULT_COLORS.codex : DEFAULT_COLORS.claudeAgent),
       } as const;
-      if (
-        usage === undefined ||
-        usage.driver !== provider.driverKind ||
-        !isValidPercent(usage.fiveHour.usedPercent) ||
-        !isValidPercent(usage.weekly.usedPercent)
-      ) {
+      if (usage === undefined || usage.driver !== provider.driverKind) {
         return [{ ...base, state: "pending" as const }];
       }
-      const fiveHourResetLabel = formatFutureDuration(usage.fiveHour.resetsAt, nowEpochMs);
-      const weeklyResetLabel = formatFutureDuration(usage.weekly.resetsAt, nowEpochMs);
-      if (fiveHourResetLabel === null || weeklyResetLabel === null) {
+      const fiveHourResetLabel = usage.fiveHour
+        ? formatFutureDuration(usage.fiveHour.resetsAt, nowEpochMs)
+        : null;
+      const weeklyResetLabel = usage.weekly
+        ? formatFutureDuration(usage.weekly.resetsAt, nowEpochMs)
+        : null;
+      const hasFiveHour =
+        usage.fiveHour !== undefined &&
+        isValidPercent(usage.fiveHour.usedPercent) &&
+        fiveHourResetLabel !== null;
+      const hasWeekly =
+        usage.weekly !== undefined &&
+        isValidPercent(usage.weekly.usedPercent) &&
+        weeklyResetLabel !== null;
+      if (!hasFiveHour && !hasWeekly) {
         return [{ ...base, state: "pending" as const }];
       }
       return [
         {
           ...base,
           state: "ready" as const,
-          fiveHourPercent: Math.round(usage.fiveHour.usedPercent),
-          weeklyPercent: Math.round(usage.weekly.usedPercent),
-          fiveHourResetLabel,
-          weeklyResetLabel,
+          ...(hasFiveHour
+            ? {
+                fiveHourPercent: Math.round(usage.fiveHour.usedPercent),
+                fiveHourResetLabel,
+              }
+            : {}),
+          ...(hasWeekly
+            ? {
+                weeklyPercent: Math.round(usage.weekly.usedPercent),
+                weeklyResetLabel,
+              }
+            : {}),
           updatedLabel: formatUpdatedAge(usage.observedAt, nowEpochMs),
         },
       ];
@@ -163,18 +178,22 @@ export function ProviderUsageLimitDetail(props: {
         />
         <span className="truncate text-sm font-semibold">{indicator.label}</span>
       </div>
-      <UsageMeter
-        label="5 hour"
-        percent={indicator.fiveHourPercent}
-        resetLabel={indicator.fiveHourResetLabel}
-        color={indicator.color}
-      />
-      <UsageMeter
-        label="Week"
-        percent={indicator.weeklyPercent}
-        resetLabel={indicator.weeklyResetLabel}
-        color={indicator.color}
-      />
+      {indicator.fiveHourPercent !== undefined && indicator.fiveHourResetLabel !== undefined ? (
+        <UsageMeter
+          label="5 hour"
+          percent={indicator.fiveHourPercent}
+          resetLabel={indicator.fiveHourResetLabel}
+          color={indicator.color}
+        />
+      ) : null}
+      {indicator.weeklyPercent !== undefined && indicator.weeklyResetLabel !== undefined ? (
+        <UsageMeter
+          label="Week"
+          percent={indicator.weeklyPercent}
+          resetLabel={indicator.weeklyResetLabel}
+          color={indicator.color}
+        />
+      ) : null}
       <div className="border-t pt-2 text-[11px] text-muted-foreground">
         Updated {indicator.updatedLabel}
       </div>
@@ -208,29 +227,44 @@ export const ProviderUsageLimitIndicatorsView = memo(
       <div className="grid grid-cols-2 gap-1 group-data-[collapsible=icon]:hidden">
         {props.indicators.map((indicator) => {
           const dotStyle = { backgroundColor: indicator.color } satisfies CSSProperties;
+          const usageLabel =
+            indicator.state === "ready"
+              ? [
+                  indicator.fiveHourPercent === undefined
+                    ? "5 hour unavailable"
+                    : `5 hour ${indicator.fiveHourPercent}% used`,
+                  indicator.weeklyPercent === undefined
+                    ? "week unavailable"
+                    : `week ${indicator.weeklyPercent}% used`,
+                ].join(", ")
+              : "waiting for real usage data";
           return (
             <Tooltip key={indicator.providerInstanceId}>
               <TooltipTrigger
                 render={
                   <button
                     type="button"
-                    aria-label={
-                      indicator.state === "ready"
-                        ? `${indicator.label} usage: 5 hour ${indicator.fiveHourPercent}% used, week ${indicator.weeklyPercent}% used`
-                        : `${indicator.label} usage: waiting for real usage data`
-                    }
+                    aria-label={`${indicator.label} usage: ${usageLabel}`}
                     className="flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-md border border-sidebar-border/70 bg-sidebar-control-surface px-2 text-[11px] font-medium tabular-nums text-sidebar-foreground hover:bg-sidebar-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
                   />
                 }
               >
                 <span aria-hidden className="size-1.5 shrink-0 rounded-full" style={dotStyle} />
                 <span>
-                  5h {indicator.state === "ready" ? `${indicator.fiveHourPercent}%` : "—"}
+                  5h{" "}
+                  {indicator.state === "ready" && indicator.fiveHourPercent !== undefined
+                    ? `${indicator.fiveHourPercent}%`
+                    : "—"}
                 </span>
                 <span aria-hidden className="text-sidebar-muted-foreground/50">
                   |
                 </span>
-                <span>wk {indicator.state === "ready" ? `${indicator.weeklyPercent}%` : "—"}</span>
+                <span>
+                  wk{" "}
+                  {indicator.state === "ready" && indicator.weeklyPercent !== undefined
+                    ? `${indicator.weeklyPercent}%`
+                    : "—"}
+                </span>
               </TooltipTrigger>
               <TooltipPopup side="right" align="start" sideOffset={8} className="px-2 py-1">
                 {indicator.state === "ready" ? (

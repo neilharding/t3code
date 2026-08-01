@@ -114,16 +114,14 @@ export const projectProviderUsageLimitSnapshots = (
       return [];
     }
     const active = pruneExpiredProviderUsageLimitsRecord(record, nowEpochMs);
-    if (active?.fiveHour === undefined || active.weekly === undefined) {
-      return [];
-    }
+    if (active === undefined) return [];
     return [
       {
         providerInstanceId: active.providerInstanceId,
         driver: active.driver,
         observedAt: active.observedAt,
-        fiveHour: active.fiveHour,
-        weekly: active.weekly,
+        ...(active.fiveHour ? { fiveHour: active.fiveHour } : {}),
+        ...(active.weekly ? { weekly: active.weekly } : {}),
       },
     ];
   });

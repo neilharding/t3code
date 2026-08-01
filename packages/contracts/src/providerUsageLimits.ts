@@ -30,8 +30,8 @@ export const ProviderUsageLimitsSnapshot = Schema.Struct({
   providerInstanceId: ProviderInstanceId,
   driver: ProviderDriverKind,
   observedAt: UsageLimitIsoDateTime,
-  fiveHour: ProviderUsageLimitWindow,
-  weekly: ProviderUsageLimitWindow,
+  fiveHour: Schema.optionalKey(ProviderUsageLimitWindow),
+  weekly: Schema.optionalKey(ProviderUsageLimitWindow),
 });
 export type ProviderUsageLimitsSnapshot = typeof ProviderUsageLimitsSnapshot.Type;
 

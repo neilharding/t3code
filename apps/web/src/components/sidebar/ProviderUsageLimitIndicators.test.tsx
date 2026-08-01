@@ -96,6 +96,7 @@ describe("buildProviderUsageLimitIndicators", () => {
         [
           makeLimits(codexId, codex, {
             fiveHour: { usedPercent: 101, resetsAt: "2026-07-31T17:00:00.000Z" },
+            weekly: { usedPercent: 101, resetsAt: "2026-08-07T12:00:00.000Z" },
           }),
         ],
         [makeProvider(codexId, codex)],
@@ -106,6 +107,7 @@ describe("buildProviderUsageLimitIndicators", () => {
       buildProviderUsageLimitIndicators(
         [
           makeLimits(codexId, codex, {
+            fiveHour: { usedPercent: 20, resetsAt: "2026-07-31T11:00:00.000Z" },
             weekly: { usedPercent: 60, resetsAt: "2026-07-31T11:00:00.000Z" },
           }),
         ],
@@ -113,6 +115,29 @@ describe("buildProviderUsageLimitIndicators", () => {
         NOW,
       ),
     ).toMatchObject([{ providerInstanceId: codexId, state: "pending" }]);
+  });
+
+  it("shows a provider's real weekly value when no five-hour window is available", () => {
+    expect(
+      buildProviderUsageLimitIndicators(
+        [
+          {
+            providerInstanceId: codexId,
+            driver: codex,
+            observedAt: "2026-07-31T11:55:00.000Z",
+            weekly: { usedPercent: 60, resetsAt: "2026-08-07T12:00:00.000Z" },
+          },
+        ],
+        [makeProvider(codexId, codex)],
+        NOW,
+      ),
+    ).toMatchObject([
+      {
+        providerInstanceId: codexId,
+        state: "ready",
+        weeklyPercent: 60,
+      },
+    ]);
   });
 
   it("shows a pending indicator when an eligible provider has no snapshot", () => {

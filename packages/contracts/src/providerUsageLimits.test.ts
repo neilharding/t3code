@@ -55,18 +55,26 @@ describe("ProviderUsageLimitsSnapshot", () => {
     });
   });
 
-  it("rejects an incomplete display snapshot", () => {
-    expect(() =>
+  it("decodes a snapshot when a provider exposes only one real window", () => {
+    expect(
       decodeSnapshot({
         providerInstanceId: "codex",
         driver: "codex",
         observedAt: "2026-02-28T00:00:00.000Z",
-        fiveHour: {
-          usedPercent: 25,
-          resetsAt: "2026-02-28T05:00:00.000Z",
+        weekly: {
+          usedPercent: 50,
+          resetsAt: "2026-03-07T00:00:00.000Z",
         },
       }),
-    ).toThrow();
+    ).toEqual({
+      providerInstanceId: "codex",
+      driver: "codex",
+      observedAt: "2026-02-28T00:00:00.000Z",
+      weekly: {
+        usedPercent: 50,
+        resetsAt: "2026-03-07T00:00:00.000Z",
+      },
+    });
   });
 });
 

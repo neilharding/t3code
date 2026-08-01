@@ -155,7 +155,7 @@ describe("provider usage limit projection", () => {
     ).toEqual(new Map());
   });
 
-  it("hides incomplete and expired records", () => {
+  it("projects an active real window when the other provider window is absent", () => {
     expect(
       projectProviderUsageLimitSnapshots(
         new Map([
@@ -165,13 +165,20 @@ describe("provider usage limit projection", () => {
               providerInstanceId: instanceId,
               driver: codex,
               observedAt: "1970-01-01T00:16:40.000Z",
-              fiveHour: { usedPercent: 23, resetsAt: EXPIRED_RESET },
+              weekly: { usedPercent: 61, resetsAt: WEEKLY_RESET },
             },
           ],
         ]),
         [makeProvider()],
         NOW,
       ),
-    ).toEqual([]);
+    ).toEqual([
+      {
+        providerInstanceId: instanceId,
+        driver: codex,
+        observedAt: "1970-01-01T00:16:40.000Z",
+        weekly: { usedPercent: 61, resetsAt: WEEKLY_RESET },
+      },
+    ]);
   });
 });

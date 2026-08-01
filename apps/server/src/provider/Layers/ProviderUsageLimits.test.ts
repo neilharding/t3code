@@ -137,89 +137,100 @@ it.layer(NodeServices.layer)("ProviderUsageLimitsLive", (it) => {
       );
 
       assert.strictEqual(snapshots.length, 1);
-      assert.strictEqual(snapshots[0]?.fiveHour.usedPercent, 20);
-      assert.strictEqual(snapshots[0]?.weekly.usedPercent, 60);
+      const snapshot = snapshots[0];
+      assert.ok(snapshot?.fiveHour);
+      assert.ok(snapshot.weekly);
+      assert.strictEqual(snapshot.fiveHour.usedPercent, 20);
+      assert.strictEqual(snapshot.weekly.usedPercent, 60);
     }),
   );
 
-  it.effect("merges sparse events, emits full snapshots, and removes ineligible providers", () =>
-    Effect.gen(function* () {
-      const eventBus = yield* PubSub.unbounded<ProviderRuntimeEvent>();
-      const providerChanges = yield* PubSub.unbounded<ReadonlyArray<ServerProvider>>();
-      const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>([makeProvider()]);
-      const fs = yield* FileSystem.FileSystem;
-      const cacheDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-usage-limits-layer-" });
-      const providerService = {
-        startSession: unsupported,
-        sendTurn: unsupported,
-        interruptTurn: unsupported,
-        respondToRequest: unsupported,
-        respondToUserInput: unsupported,
-        stopSession: unsupported,
-        listSessions: unsupported,
-        getCapabilities: unsupported,
-        getInstanceInfo: unsupported,
-        rollbackConversation: unsupported,
-        streamEvents: Stream.fromPubSub(eventBus),
-      } satisfies ProviderServiceShape;
-      const providerRegistry = {
-        getProviders: Ref.get(providersRef),
-        refresh: () => Ref.get(providersRef),
-        refreshInstance: () => Ref.get(providersRef),
-        getProviderMaintenanceCapabilitiesForInstance: unsupported,
-        setProviderMaintenanceActionState: unsupported,
-        streamChanges: Stream.fromPubSub(providerChanges),
-      } satisfies ProviderRegistryShape;
-      const config = { providerStatusCacheDir: cacheDir } as ServerConfig["Service"];
+  it.effect(
+    "merges sparse events, emits available snapshots, and removes ineligible providers",
+    () =>
+      Effect.gen(function* () {
+        const eventBus = yield* PubSub.unbounded<ProviderRuntimeEvent>();
+        const providerChanges = yield* PubSub.unbounded<ReadonlyArray<ServerProvider>>();
+        const providersRef = yield* Ref.make<ReadonlyArray<ServerProvider>>([makeProvider()]);
+        const fs = yield* FileSystem.FileSystem;
+        const cacheDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-usage-limits-layer-" });
+        const providerService = {
+          startSession: unsupported,
+          sendTurn: unsupported,
+          interruptTurn: unsupported,
+          respondToRequest: unsupported,
+          respondToUserInput: unsupported,
+          stopSession: unsupported,
+          listSessions: unsupported,
+          getCapabilities: unsupported,
+          getInstanceInfo: unsupported,
+          rollbackConversation: unsupported,
+          streamEvents: Stream.fromPubSub(eventBus),
+        } satisfies ProviderServiceShape;
+        const providerRegistry = {
+          getProviders: Ref.get(providersRef),
+          refresh: () => Ref.get(providersRef),
+          refreshInstance: () => Ref.get(providersRef),
+          getProviderMaintenanceCapabilitiesForInstance: unsupported,
+          setProviderMaintenanceActionState: unsupported,
+          streamChanges: Stream.fromPubSub(providerChanges),
+        } satisfies ProviderRegistryShape;
+        const config = { providerStatusCacheDir: cacheDir } as ServerConfig["Service"];
 
-      const program = Effect.gen(function* () {
-        const usageLimits = yield* ProviderUsageLimits;
-        yield* Effect.yieldNow;
+        const program = Effect.gen(function* () {
+          const usageLimits = yield* ProviderUsageLimits;
+          yield* Effect.yieldNow;
 
-        yield* PubSub.publish(
-          eventBus,
-          makeUsageEvent("1970-01-01T00:00:01.000Z", {
-            fiveHour: { usedPercent: 20, resetsAt: resetFiveHour },
-          }),
+          yield* PubSub.publish(
+            eventBus,
+            makeUsageEvent("1970-01-01T00:00:01.000Z", {
+              fiveHour: { usedPercent: 20, resetsAt: resetFiveHour },
+            }),
+          );
+          yield* Effect.yieldNow;
+          const fiveHourOnly = yield* usageLimits.getSnapshots;
+          assert.strictEqual(fiveHourOnly.length, 1);
+          assert.strictEqual(fiveHourOnly[0]?.fiveHour?.usedPercent, 20);
+          assert.strictEqual(fiveHourOnly[0]?.weekly, undefined);
+
+          const completedFiber = yield* usageLimits.streamChanges.pipe(
+            Stream.drop(1),
+            Stream.runHead,
+            Effect.forkChild,
+          );
+          yield* Effect.yieldNow;
+          yield* PubSub.publish(
+            eventBus,
+            makeUsageEvent("1970-01-01T00:00:02.000Z", {
+              weekly: { usedPercent: 60, resetsAt: resetWeekly },
+            }),
+          );
+          const completed = yield* Fiber.join(completedFiber);
+          const complete = Option.getOrThrow(completed)[0];
+          assert.ok(complete?.fiveHour);
+          assert.ok(complete.weekly);
+          assert.strictEqual(complete.fiveHour.usedPercent, 20);
+          assert.strictEqual(complete.weekly.usedPercent, 60);
+
+          const removedFiber = yield* usageLimits.streamChanges.pipe(
+            Stream.drop(1),
+            Stream.runHead,
+            Effect.forkChild,
+          );
+          yield* Effect.yieldNow;
+          const disabled = [makeProvider({ enabled: false, status: "disabled" })];
+          yield* Ref.set(providersRef, disabled);
+          yield* PubSub.publish(providerChanges, disabled);
+          assert.deepStrictEqual(Option.getOrThrow(yield* Fiber.join(removedFiber)), []);
+        });
+
+        return yield* program.pipe(
+          Effect.provide(makeTestLayer(providerService, providerRegistry, config)),
         );
-        yield* Effect.yieldNow;
-        assert.deepStrictEqual(yield* usageLimits.getSnapshots, []);
-
-        const completedFiber = yield* usageLimits.streamChanges.pipe(
-          Stream.drop(1),
-          Stream.runHead,
-          Effect.forkChild,
-        );
-        yield* Effect.yieldNow;
-        yield* PubSub.publish(
-          eventBus,
-          makeUsageEvent("1970-01-01T00:00:02.000Z", {
-            weekly: { usedPercent: 60, resetsAt: resetWeekly },
-          }),
-        );
-        const completed = yield* Fiber.join(completedFiber);
-        assert.strictEqual(Option.getOrThrow(completed)[0]?.fiveHour.usedPercent, 20);
-        assert.strictEqual(Option.getOrThrow(completed)[0]?.weekly.usedPercent, 60);
-
-        const removedFiber = yield* usageLimits.streamChanges.pipe(
-          Stream.drop(1),
-          Stream.runHead,
-          Effect.forkChild,
-        );
-        yield* Effect.yieldNow;
-        const disabled = [makeProvider({ enabled: false, status: "disabled" })];
-        yield* Ref.set(providersRef, disabled);
-        yield* PubSub.publish(providerChanges, disabled);
-        assert.deepStrictEqual(Option.getOrThrow(yield* Fiber.join(removedFiber)), []);
-      });
-
-      return yield* program.pipe(
-        Effect.provide(makeTestLayer(providerService, providerRegistry, config)),
-      );
-    }),
+      }),
   );
 
-  it.effect("expires the nearest reset without polling", () =>
+  it.effect("removes an expired window without discarding the other active window", () =>
     Effect.gen(function* () {
       const eventBus = yield* PubSub.unbounded<ProviderRuntimeEvent>();
       const providers = [makeProvider()];
@@ -267,7 +278,14 @@ it.layer(NodeServices.layer)("ProviderUsageLimitsLive", (it) => {
         );
         yield* Effect.yieldNow;
         yield* TestClock.adjust("10 seconds");
-        assert.deepStrictEqual(Option.getOrThrow(yield* Fiber.join(expiredFiber)), []);
+        assert.deepStrictEqual(Option.getOrThrow(yield* Fiber.join(expiredFiber)), [
+          {
+            providerInstanceId: instanceId,
+            driver: codex,
+            observedAt: "1970-01-01T00:00:01.000Z",
+            weekly: { usedPercent: 60, resetsAt: resetWeekly },
+          },
+        ]);
       });
 
       return yield* program.pipe(

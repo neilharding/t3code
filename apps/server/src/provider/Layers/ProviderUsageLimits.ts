@@ -41,6 +41,14 @@ interface PersistenceRequest {
   readonly record: ProviderUsageLimitsRecord | undefined;
 }
 
+const usageWindowsEqual = (
+  left: ProviderUsageLimitsSnapshot["fiveHour"],
+  right: ProviderUsageLimitsSnapshot["fiveHour"],
+): boolean =>
+  left === undefined || right === undefined
+    ? left === right
+    : left.usedPercent === right.usedPercent && left.resetsAt === right.resetsAt;
+
 const snapshotsEqual = (
   left: ReadonlyArray<ProviderUsageLimitsSnapshot>,
   right: ReadonlyArray<ProviderUsageLimitsSnapshot>,
@@ -53,10 +61,8 @@ const snapshotsEqual = (
       entry.providerInstanceId === other.providerInstanceId &&
       entry.driver === other.driver &&
       entry.observedAt === other.observedAt &&
-      entry.fiveHour.usedPercent === other.fiveHour.usedPercent &&
-      entry.fiveHour.resetsAt === other.fiveHour.resetsAt &&
-      entry.weekly.usedPercent === other.weekly.usedPercent &&
-      entry.weekly.resetsAt === other.weekly.resetsAt
+      usageWindowsEqual(entry.fiveHour, other.fiveHour) &&
+      usageWindowsEqual(entry.weekly, other.weekly)
     );
   });
 

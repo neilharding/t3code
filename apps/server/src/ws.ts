@@ -55,6 +55,9 @@ import {
   type TerminalError,
   type TerminalEvent,
   type TerminalMetadataStreamEvent,
+  type ProviderUsageLimitsSnapshot,
+  type ProviderUsageLimitsSnapshotV1,
+  type ProviderUsageLimitsStreamEvent,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -79,6 +82,7 @@ import {
   observeRpcStreamEffect as instrumentRpcStreamEffect,
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
+import * as ProviderUsageLimits from "./provider/Services/ProviderUsageLimits.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -366,6 +370,7 @@ const makeWsRpcLayer = (
       const previewManager = yield* PreviewManager.PreviewManager;
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
+      const providerUsageLimits = yield* ProviderUsageLimits.ProviderUsageLimits;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
       const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
@@ -2087,6 +2092,37 @@ const makeWsRpcLayer = (
             Stream.unwrap(
               Effect.map(backgroundPolicy.subscribe, ({ latest, changes }) =>
                 Stream.concat(Stream.make(latest), changes),
+              ),
+            ),
+            { "rpc.aggregate": "server" },
+          ),
+        [WS_METHODS.subscribeProviderUsageLimits]: (input) =>
+          observeRpcStreamEffect(
+            WS_METHODS.subscribeProviderUsageLimits,
+            providerUsageLimits.getSnapshots.pipe(
+              Effect.map((initialEntries) =>
+                (() => {
+                  const isV1Entry = (
+                    entry: ProviderUsageLimitsSnapshot,
+                  ): entry is ProviderUsageLimitsSnapshotV1 =>
+                    entry.fiveHour !== undefined && entry.weekly !== undefined;
+                  const makeEvent = (
+                    entries: typeof initialEntries,
+                  ): ProviderUsageLimitsStreamEvent =>
+                    input.version === 2
+                      ? { version: 2 as const, type: "snapshot" as const, entries }
+                      : {
+                          version: 1 as const,
+                          type: "snapshot" as const,
+                          entries: entries.every(isV1Entry)
+                            ? (entries as ReadonlyArray<ProviderUsageLimitsSnapshotV1>)
+                            : entries.filter(isV1Entry),
+                        };
+                  return Stream.concat(
+                    Stream.make(makeEvent(initialEntries)),
+                    providerUsageLimits.streamChanges.pipe(Stream.map(makeEvent)),
+                  ).pipe(Stream.changesWith((previous, next) => previous.entries === next.entries));
+                })(),
               ),
             ),
             { "rpc.aggregate": "server" },

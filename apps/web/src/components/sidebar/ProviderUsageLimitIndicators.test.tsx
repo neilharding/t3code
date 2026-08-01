@@ -1,0 +1,234 @@
+import { describe, expect, it } from "vite-plus/test";
+import { renderToStaticMarkup } from "react-dom/server";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ProviderUsageLimitsSnapshot,
+  type ServerProvider,
+} from "@t3tools/contracts";
+
+import {
+  buildProviderUsageLimitIndicators,
+  PROVIDER_USAGE_TOOLTIP_CLOSE_DELAY,
+  PROVIDER_USAGE_TOOLTIP_DELAY,
+  ProviderUsageLimitDetail,
+  ProviderUsageLimitIndicatorsView,
+  ProviderUsageLimitPendingDetail,
+  resolveProviderUsageTooltipOpen,
+} from "./ProviderUsageLimitIndicators";
+
+const NOW = Date.parse("2026-07-31T12:00:00.000Z");
+const codexId = ProviderInstanceId.make("codex_personal");
+const claudeId = ProviderInstanceId.make("claude_work");
+const codex = ProviderDriverKind.make("codex");
+const claude = ProviderDriverKind.make("claudeAgent");
+
+const makeProvider = (
+  instanceId: ReturnType<typeof ProviderInstanceId.make>,
+  driver: ReturnType<typeof ProviderDriverKind.make>,
+  overrides: Partial<ServerProvider> = {},
+): ServerProvider => ({
+  instanceId,
+  driver,
+  displayName: driver === codex ? "Codex" : "Claude Code",
+  enabled: true,
+  installed: true,
+  version: "1.0.0",
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-07-31T12:00:00.000Z",
+  availability: "available",
+  models: [],
+  slashCommands: [],
+  skills: [],
+  ...overrides,
+});
+
+const makeLimits = (
+  providerInstanceId: ReturnType<typeof ProviderInstanceId.make>,
+  driver: ReturnType<typeof ProviderDriverKind.make>,
+  overrides: Partial<ProviderUsageLimitsSnapshot> = {},
+): ProviderUsageLimitsSnapshot => ({
+  providerInstanceId,
+  driver,
+  observedAt: "2026-07-31T11:55:00.000Z",
+  fiveHour: { usedPercent: 20.4, resetsAt: "2026-07-31T17:00:00.000Z" },
+  weekly: { usedPercent: 60.6, resetsAt: "2026-08-07T12:00:00.000Z" },
+  ...overrides,
+});
+
+describe("buildProviderUsageLimitIndicators", () => {
+  it("joins by instance and driver in provider order with configured/default colors", () => {
+    const providers = [
+      makeProvider(claudeId, claude, { accentColor: "#123456" }),
+      makeProvider(codexId, codex),
+    ];
+    const indicators = buildProviderUsageLimitIndicators(
+      [makeLimits(codexId, codex), makeLimits(claudeId, claude)],
+      providers,
+      NOW,
+    );
+
+    expect(indicators.map((indicator) => indicator.providerInstanceId)).toEqual([
+      claudeId,
+      codexId,
+    ]);
+    expect(indicators[0]).toMatchObject({
+      state: "ready",
+      color: "#123456",
+      fiveHourPercent: 20,
+      weeklyPercent: 61,
+    });
+    expect(indicators[1]?.color).toBe("#3b82f6");
+  });
+
+  it.each([
+    ["disabled", makeProvider(codexId, codex, { enabled: false })],
+    ["not installed", makeProvider(codexId, codex, { installed: false })],
+    ["unavailable", makeProvider(codexId, codex, { availability: "unavailable" })],
+    ["unauthenticated", makeProvider(codexId, codex, { auth: { status: "unauthenticated" } })],
+  ])("hides %s instances", (_label, provider) => {
+    expect(
+      buildProviderUsageLimitIndicators([makeLimits(codexId, codex)], [provider], NOW),
+    ).toEqual([]);
+  });
+
+  it("keeps eligible instances visible while real usage is unavailable", () => {
+    expect(
+      buildProviderUsageLimitIndicators(
+        [
+          makeLimits(codexId, codex, {
+            fiveHour: { usedPercent: 101, resetsAt: "2026-07-31T17:00:00.000Z" },
+            weekly: { usedPercent: 101, resetsAt: "2026-08-07T12:00:00.000Z" },
+          }),
+        ],
+        [makeProvider(codexId, codex)],
+        NOW,
+      ),
+    ).toMatchObject([{ providerInstanceId: codexId, state: "pending" }]);
+    expect(
+      buildProviderUsageLimitIndicators(
+        [
+          makeLimits(codexId, codex, {
+            fiveHour: { usedPercent: 20, resetsAt: "2026-07-31T11:00:00.000Z" },
+            weekly: { usedPercent: 60, resetsAt: "2026-07-31T11:00:00.000Z" },
+          }),
+        ],
+        [makeProvider(codexId, codex)],
+        NOW,
+      ),
+    ).toMatchObject([{ providerInstanceId: codexId, state: "pending" }]);
+  });
+
+  it("shows a provider's real weekly value when no five-hour window is available", () => {
+    expect(
+      buildProviderUsageLimitIndicators(
+        [
+          {
+            providerInstanceId: codexId,
+            driver: codex,
+            observedAt: "2026-07-31T11:55:00.000Z",
+            weekly: { usedPercent: 60, resetsAt: "2026-08-07T12:00:00.000Z" },
+          },
+        ],
+        [makeProvider(codexId, codex)],
+        NOW,
+      ),
+    ).toMatchObject([
+      {
+        providerInstanceId: codexId,
+        state: "ready",
+        weeklyPercent: 60,
+      },
+    ]);
+  });
+
+  it("shows a pending indicator when an eligible provider has no snapshot", () => {
+    expect(
+      buildProviderUsageLimitIndicators([], [makeProvider(claudeId, claude)], NOW),
+    ).toMatchObject([{ providerInstanceId: claudeId, state: "pending", color: "#f97316" }]);
+  });
+});
+
+describe("resolveProviderUsageTooltipOpen", () => {
+  it("toggles the controlled tooltip open on successive chip clicks", () => {
+    expect(resolveProviderUsageTooltipOpen(false, "toggle")).toBe(true);
+    expect(resolveProviderUsageTooltipOpen(true, "toggle")).toBe(false);
+  });
+
+  it("uses an open change from hover or focus", () => {
+    expect(resolveProviderUsageTooltipOpen(false, true)).toBe(true);
+  });
+
+  it("uses a false open change from Escape dismissal", () => {
+    expect(resolveProviderUsageTooltipOpen(true, false)).toBe(false);
+  });
+
+  it("uses the shortest supported hover delays", () => {
+    expect(PROVIDER_USAGE_TOOLTIP_DELAY).toBe(0);
+    expect(PROVIDER_USAGE_TOOLTIP_CLOSE_DELAY).toBe(0);
+  });
+});
+
+describe("ProviderUsageLimitIndicatorsView", () => {
+  const indicator = buildProviderUsageLimitIndicators(
+    [makeLimits(codexId, codex)],
+    [makeProvider(codexId, codex)],
+    NOW,
+  )[0]!;
+
+  it("renders the compact OpenAI mark with five-hour then weekly copy", () => {
+    const markup = renderToStaticMarkup(
+      <ProviderUsageLimitIndicatorsView indicators={[indicator]} />,
+    );
+    expect(markup).toContain("group-data-[collapsible=icon]:hidden");
+    expect(markup).toContain("grid-cols-2");
+    expect(markup).toContain("5h 20%");
+    expect(markup).toContain("wk 61%");
+    expect(markup.indexOf("5h 20%")).toBeLessThan(markup.indexOf("wk 61%"));
+    expect(markup).not.toContain(">Codex<");
+    expect(markup).toContain('viewBox="0 0 256 260"');
+    expect(markup).toContain('aria-label="Codex Personal usage: 5 hour 20% used, week 61% used"');
+  });
+
+  it("renders the compact Claude mark for Claude instances", () => {
+    const claudeIndicator = buildProviderUsageLimitIndicators(
+      [makeLimits(claudeId, claude)],
+      [makeProvider(claudeId, claude)],
+      NOW,
+    )[0]!;
+
+    const markup = renderToStaticMarkup(
+      <ProviderUsageLimitIndicatorsView indicators={[claudeIndicator]} />,
+    );
+
+    expect(markup).toContain('viewBox="0 0 256 257"');
+    expect(markup).toContain('aria-label="Claude Code usage: 5 hour 20% used, week 61% used"');
+  });
+
+  it("renders the real-data waiting state without meters or made-up percentages", () => {
+    const pending = buildProviderUsageLimitIndicators([], [makeProvider(codexId, codex)], NOW)[0]!;
+    if (pending.state !== "pending") throw new Error("expected a pending usage indicator");
+    const markup = renderToStaticMarkup(
+      <ProviderUsageLimitIndicatorsView indicators={[pending]} />,
+    );
+    const detail = renderToStaticMarkup(<ProviderUsageLimitPendingDetail indicator={pending} />);
+
+    expect(markup).toContain("5h —");
+    expect(markup).toContain("wk —");
+    expect(detail).toContain("Waiting for usage data from this provider.");
+    expect(markup).not.toContain('role="meter"');
+    expect(markup).toContain('aria-label="Codex Personal usage: waiting for real usage data"');
+  });
+
+  it("renders detail meters, reset labels, and updated age", () => {
+    if (indicator.state !== "ready") throw new Error("expected a ready usage indicator");
+    const markup = renderToStaticMarkup(<ProviderUsageLimitDetail indicator={indicator} />);
+    expect(markup).toContain("Codex Personal");
+    expect(markup.match(/role="meter"/gu)).toHaveLength(2);
+    expect(markup).toContain("20% used");
+    expect(markup).toContain("61% used");
+    expect(markup).toContain("Resets in 5h");
+    expect(markup).toContain("Updated 5m ago");
+  });
+});

@@ -84,6 +84,18 @@ CLAUDE_CONFIG_DIR path: ~/.claude_personal_home
 Use the email shown in Settings to confirm each provider is using the intended account. Emails are
 blurred by default; click the blurred email to reveal it.
 
+## Usage Limits In The Sidebar
+
+On web and desktop, authenticated Claude Code providers show a compact chip above Search. It shows
+five-hour percent used first, followed by the week. While T3 Code is waiting for an authenticated
+Claude usage response, the chip shows `5h — | wk —` instead of disappearing.
+
+Hover over the chip, or focus it with the keyboard, to see the current meters, reset times, and
+when the data was last updated. T3 Code reads Claude's existing local OAuth credential context and
+requests its usage snapshot without starting a Claude session. Credentials remain on the server and
+are never sent to the app. Model-specific weekly limits and disabled, unavailable, or signed-out
+providers remain hidden.
+
 ## Can I Switch Claude Accounts In An Existing Thread?
 
 Usually, no.

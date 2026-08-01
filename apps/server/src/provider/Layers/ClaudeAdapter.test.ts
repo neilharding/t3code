@@ -9,6 +9,7 @@ import type {
   PermissionMode,
   PermissionResult,
   SDKMessage,
+  SDKRateLimitInfo,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import {
@@ -37,8 +38,70 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { ProviderAdapterProcessError, ProviderAdapterValidationError } from "../Errors.ts";
 import type { ClaudeAdapterShape } from "../Services/ClaudeAdapter.ts";
-import { makeClaudeAdapter, type ClaudeAdapterLiveOptions } from "./ClaudeAdapter.ts";
+import {
+  makeClaudeAdapter,
+  normalizeClaudeUsageLimits,
+  type ClaudeAdapterLiveOptions,
+} from "./ClaudeAdapter.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
+
+it("normalizes Claude five-hour utilization as percent used", () => {
+  assert.deepEqual(
+    normalizeClaudeUsageLimits({
+      status: "allowed_warning",
+      rateLimitType: "five_hour",
+      utilization: 35,
+      resetsAt: 1_767_243_600,
+    } satisfies SDKRateLimitInfo),
+    {
+      fiveHour: {
+        usedPercent: 35,
+        resetsAt: "2026-01-01T05:00:00.000Z",
+      },
+    },
+  );
+});
+
+it("normalizes Claude general seven-day limits with millisecond reset timestamps", () => {
+  assert.deepEqual(
+    normalizeClaudeUsageLimits({
+      status: "allowed",
+      rateLimitType: "seven_day",
+      utilization: 65,
+      resetsAt: 1_767_830_400_000,
+    } satisfies SDKRateLimitInfo),
+    {
+      weekly: {
+        usedPercent: 65,
+        resetsAt: "2026-01-08T00:00:00.000Z",
+      },
+    },
+  );
+});
+
+it("omits Claude utilization outside the provider contract", () => {
+  assert.deepEqual(
+    normalizeClaudeUsageLimits({
+      status: "rejected",
+      rateLimitType: "five_hour",
+      utilization: 104,
+      resetsAt: 1_767_243_600,
+    } satisfies SDKRateLimitInfo),
+    {},
+  );
+});
+
+it("ignores Claude model-specific seven-day limits", () => {
+  assert.deepEqual(
+    normalizeClaudeUsageLimits({
+      status: "allowed",
+      rateLimitType: "seven_day_opus",
+      utilization: 80,
+      resetsAt: 1_767_830_400,
+    } satisfies SDKRateLimitInfo),
+    {},
+  );
+});
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
 class ClaudeAdapter extends Context.Service<ClaudeAdapter, ClaudeAdapterShape>()(
@@ -268,6 +331,53 @@ const THREAD_ID = ThreadId.make("thread-claude-1");
 const RESUME_THREAD_ID = ThreadId.make("thread-claude-resume");
 
 describe("ClaudeAdapterLive", () => {
+  it.effect("emits normalized Claude account usage limits", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const usageEventFiber = yield* adapter.streamEvents.pipe(
+        Stream.filter((event) => event.type === "account.rate-limits.updated"),
+        Stream.runHead,
+        Effect.forkChild,
+      );
+
+      yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      harness.query.emit({
+        type: "rate_limit_event",
+        uuid: "rate-limit-event-1",
+        session_id: "sdk-session-rate-limit",
+        rate_limit_info: {
+          status: "allowed_warning",
+          rateLimitType: "five_hour",
+          utilization: 35,
+          resetsAt: 1_767_243_600,
+        },
+      } as unknown as SDKMessage);
+
+      const usageEvent = yield* Fiber.join(usageEventFiber);
+      assert.equal(usageEvent._tag, "Some");
+      if (usageEvent._tag !== "Some") return;
+      assert.equal(usageEvent.value.type, "account.rate-limits.updated");
+      if (usageEvent.value.type !== "account.rate-limits.updated") return;
+      assert.deepEqual(usageEvent.value.payload, {
+        limits: {
+          fiveHour: {
+            usedPercent: 35,
+            resetsAt: "2026-01-01T05:00:00.000Z",
+          },
+        },
+      });
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
+
   it.effect("returns validation error for non-claude provider on startSession", () => {
     const harness = makeHarness();
     return Effect.gen(function* () {

@@ -86,6 +86,7 @@ import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSna
 import { SqlitePersistenceMemory } from "./persistence/Layers/Sqlite.ts";
 import { PersistenceSqlError } from "./persistence/Errors.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
+import * as ProviderUsageLimits from "./provider/Services/ProviderUsageLimits.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "./provider/providerMaintenance.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
@@ -330,6 +331,7 @@ const buildAppUnderTest = (options?: {
   layers?: {
     keybindings?: Partial<Keybindings.Keybindings["Service"]>;
     providerRegistry?: Partial<ProviderRegistry.ProviderRegistry["Service"]>;
+    providerUsageLimits?: Partial<ProviderUsageLimits.ProviderUsageLimits["Service"]>;
     serverSettings?: Partial<ServerSettings.ServerSettingsService["Service"]>;
     externalLauncher?: Partial<ExternalLauncher.ExternalLauncher["Service"]>;
     vcsDriver?: Partial<VcsDriver.VcsDriver["Service"]>;
@@ -565,18 +567,25 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ProviderRegistry.ProviderRegistry)({
-          getProviders: Effect.succeed([]),
-          refresh: () => Effect.succeed([]),
-          refreshInstance: () => Effect.succeed([]),
-          getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
-            Effect.succeed(
-              makeManualOnlyProviderMaintenanceCapabilities({ provider, packageName: null }),
-            ),
-          setProviderMaintenanceActionState: () => Effect.succeed([]),
-          streamChanges: Stream.empty,
-          ...options?.layers?.providerRegistry,
-        }),
+        Layer.mergeAll(
+          Layer.mock(ProviderRegistry.ProviderRegistry)({
+            getProviders: Effect.succeed([]),
+            refresh: () => Effect.succeed([]),
+            refreshInstance: () => Effect.succeed([]),
+            getProviderMaintenanceCapabilitiesForInstance: (_instanceId, provider) =>
+              Effect.succeed(
+                makeManualOnlyProviderMaintenanceCapabilities({ provider, packageName: null }),
+              ),
+            setProviderMaintenanceActionState: () => Effect.succeed([]),
+            streamChanges: Stream.empty,
+            ...options?.layers?.providerRegistry,
+          }),
+          Layer.mock(ProviderUsageLimits.ProviderUsageLimits)({
+            getSnapshots: Effect.succeed([]),
+            streamChanges: Stream.empty,
+            ...options?.layers?.providerUsageLimits,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ServerSettings.ServerSettingsService)({
@@ -4482,6 +4491,56 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(snapshot.value.processes.length, 0);
       assert.equal(snapshot.value.groups.backend.processCount, 0);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "streams partial provider usage limit snapshots to v2 clients without raw payloads",
+    () =>
+      Effect.gen(function* () {
+        const initialEntries = [
+          {
+            providerInstanceId: ProviderInstanceId.make("codex_personal"),
+            driver: ProviderDriverKind.make("codex"),
+            observedAt: "2026-07-31T12:00:00.000Z",
+            fiveHour: { usedPercent: 20, resetsAt: "2026-07-31T17:00:00.000Z" },
+            weekly: { usedPercent: 60, resetsAt: "2026-08-07T12:00:00.000Z" },
+          },
+        ];
+        const updatedEntries = [
+          {
+            ...initialEntries[0]!,
+            observedAt: "2026-07-31T12:05:00.000Z",
+            fiveHour: { usedPercent: 25, resetsAt: "2026-07-31T17:00:00.000Z" },
+          },
+        ];
+        yield* buildAppUnderTest({
+          layers: {
+            providerUsageLimits: {
+              getSnapshots: Effect.succeed(initialEntries),
+              streamChanges: Stream.make(initialEntries, updatedEntries),
+            },
+          },
+        });
+
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const events = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.subscribeProviderUsageLimits]({ version: 2 }).pipe(
+              Stream.take(2),
+              Stream.runCollect,
+            ),
+          ),
+        );
+
+        assert.deepEqual(events, [
+          { version: 2, type: "snapshot", entries: initialEntries },
+          { version: 2, type: "snapshot", entries: updatedEntries },
+        ]);
+        for (const event of events) {
+          assert.equal(Object.hasOwn(event, "raw"), false);
+          for (const entry of event.entries) assert.equal(Object.hasOwn(entry, "raw"), false);
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc subscribeServerConfig emits provider status updates", () =>

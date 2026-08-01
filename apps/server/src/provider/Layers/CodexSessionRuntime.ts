@@ -24,6 +24,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -83,6 +84,33 @@ const CodexTurnStartParamsWithCollaborationMode = EffectCodexSchema.V2TurnStartP
 const decodeCodexTurnStartParamsWithCollaborationMode = Schema.decodeUnknownEffect(
   CodexTurnStartParamsWithCollaborationMode,
 );
+
+/**
+ * The app-server's rate-limit read response and update notification have the
+ * same snapshot shape. Routing reads through the notification path keeps the
+ * adapter's canonical usage handling in one place.
+ */
+export const toCodexRateLimitsUpdatedPayload = (
+  response: EffectCodexSchema.V2GetAccountRateLimitsResponse,
+) => ({ rateLimits: response.rateLimits, replaceExisting: true });
+
+interface CodexRateLimitsClient<E> {
+  readonly request: (
+    method: "account/rateLimits/read",
+    payload: undefined,
+  ) => Effect.Effect<EffectCodexSchema.V2GetAccountRateLimitsResponse, E>;
+}
+
+/** Reads the complete snapshot without allowing usage reporting to delay a session. */
+export const readCodexUsageLimits = <E>(client: CodexRateLimitsClient<E>) =>
+  client.request("account/rateLimits/read", undefined).pipe(
+    Effect.timeoutOption("3 seconds"),
+    Effect.map(Option.getOrUndefined),
+    Effect.map((response) =>
+      response === undefined ? undefined : toCodexRateLimitsUpdatedPayload(response),
+    ),
+    Effect.orElseSucceed(() => undefined),
+  );
 
 export type CodexTurnStartParamsWithCollaborationMode =
   typeof CodexTurnStartParamsWithCollaborationMode.Type;
@@ -1240,6 +1268,19 @@ export const makeCodexSessionRuntime = (
       } satisfies ProviderSession;
       yield* Ref.set(sessionRef, session);
       yield* emitSessionEvent("session/ready", "Codex App Server session ready.");
+      yield* readCodexUsageLimits(client).pipe(
+        Effect.flatMap((payload) =>
+          payload
+            ? emitEvent({
+                kind: "notification",
+                threadId: options.threadId,
+                method: "account/rateLimits/updated",
+                payload,
+              })
+            : Effect.void,
+        ),
+        Effect.forkIn(runtimeScope),
+      );
       return session;
     });
 

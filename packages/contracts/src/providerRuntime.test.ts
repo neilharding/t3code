@@ -181,4 +181,46 @@ describe("ProviderRuntimeEvent", () => {
     expect(parsed.payload.usage.maxTokens).toBe(200000);
     expect(parsed.payload.usage.usedTokens).toBe(31251);
   });
+
+  it("rejects legacy unnormalized account rate-limit payloads", () => {
+    expect(() =>
+      decodeRuntimeEvent({
+        type: "account.rate-limits.updated",
+        eventId: "event-rate-limits-legacy",
+        provider: "codex",
+        providerInstanceId: "codex",
+        createdAt: "2026-02-28T00:00:05.000Z",
+        threadId: "thread-1",
+        payload: {
+          rateLimits: {
+            primary: {
+              usedPercent: 25,
+              windowDurationMins: 300,
+            },
+          },
+        },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects normalized account limits outside the percent-used boundary", () => {
+    expect(() =>
+      decodeRuntimeEvent({
+        type: "account.rate-limits.updated",
+        eventId: "event-rate-limits-invalid-percent",
+        provider: "codex",
+        providerInstanceId: "codex",
+        createdAt: "2026-02-28T00:00:05.000Z",
+        threadId: "thread-1",
+        payload: {
+          limits: {
+            fiveHour: {
+              usedPercent: 101,
+              resetsAt: "2026-02-28T05:00:00.000Z",
+            },
+          },
+        },
+      }),
+    ).toThrow();
+  });
 });

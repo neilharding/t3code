@@ -14,6 +14,7 @@ import {
   type PermissionResult,
   type PermissionUpdate,
   type SDKMessage,
+  type SDKRateLimitInfo,
   type SDKControlGetContextUsageResponse,
   type SDKResultMessage,
   type SettingSource,
@@ -34,6 +35,7 @@ import {
   ProviderItemId,
   type ProviderRuntimeEvent,
   type ProviderRuntimeTurnStatus,
+  type ProviderUsageLimitsUpdate,
   type ProviderSendTurnInput,
   type ProviderSession,
   type ThreadTokenUsageSnapshot,
@@ -62,6 +64,7 @@ import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Path from "effect/Path";
+import * as Option from "effect/Option";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -100,6 +103,36 @@ type ClaudeToolResultStreamKind = Extract<
   "command_output" | "file_change_output"
 >;
 type ClaudeSdkEffort = NonNullable<ClaudeQueryOptions["effort"]>;
+
+export function normalizeClaudeUsageLimits(rateLimit: SDKRateLimitInfo): ProviderUsageLimitsUpdate {
+  if (
+    (rateLimit.rateLimitType !== "five_hour" && rateLimit.rateLimitType !== "seven_day") ||
+    rateLimit.utilization === undefined ||
+    rateLimit.resetsAt === undefined ||
+    !Number.isFinite(rateLimit.utilization) ||
+    rateLimit.utilization < 0 ||
+    rateLimit.utilization > 100
+  ) {
+    return {};
+  }
+  const usedPercent = rateLimit.utilization;
+  const rateLimitType = rateLimit.rateLimitType;
+  return Option.match(
+    DateTime.make(
+      rateLimit.resetsAt < 100_000_000_000 ? rateLimit.resetsAt * 1_000 : rateLimit.resetsAt,
+    ),
+    {
+      onNone: () => ({}),
+      onSome: (resetsAt) => {
+        const window = {
+          usedPercent,
+          resetsAt: DateTime.formatIso(resetsAt),
+        };
+        return rateLimitType === "five_hour" ? { fiveHour: window } : { weekly: window };
+      },
+    },
+  );
+}
 
 function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
   const result = encodeUnknownJsonStringExit(input);
@@ -2906,12 +2939,14 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
 
     if (message.type === "rate_limit_event") {
+      const limits = normalizeClaudeUsageLimits(message.rate_limit_info);
+      if (limits.fiveHour === undefined && limits.weekly === undefined) {
+        return;
+      }
       yield* offerRuntimeEvent({
         ...base,
         type: "account.rate-limits.updated",
-        payload: {
-          rateLimits: message,
-        },
+        payload: { limits },
       });
       return;
     }

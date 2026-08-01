@@ -9,6 +9,8 @@ import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { describe, expect, it, vi } from "@effect/vitest";
 import * as TestClock from "effect/testing/TestClock";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { SpawnExecutableResolution } from "@t3tools/shared/shell";
 
 import * as PtyAdapter from "../../terminal/PtyAdapter.ts";
 import {
@@ -78,11 +80,12 @@ const runReader = (input: {
   readonly homePath: string;
   readonly ptyAdapter: PtyAdapter.PtyAdapter["Service"];
   readonly httpClient: HttpClient.HttpClient;
+  readonly environment?: NodeJS.ProcessEnv;
 }) =>
   Effect.gen(function* () {
     const result = yield* readClaudeUsageLimits({
       config: { homePath: input.homePath, binaryPath: "fake-claude" },
-      environment: {},
+      environment: input.environment ?? {},
       childProcessSpawner: unusedChildProcessSpawner,
       ptyAdapter: input.ptyAdapter,
     });
@@ -163,6 +166,67 @@ it.layer(NodeServices.layer)("readClaudeUsageLimits", (it) => {
     });
   });
 
+  it.effect("waits for the weekly panel when the two limits arrive in separate chunks", () => {
+    const [session, weekly] = panel.split("Current week (all models)\n");
+    const pty = makePty((data, emit) => {
+      if (data !== "/usage\n") return;
+      emit(session);
+      emit(`Current week (all models)\n${weekly}`);
+    });
+    const httpClient = HttpClient.make(() => Effect.die("HTTP fallback should not run"));
+
+    return Effect.gen(function* () {
+      expect(
+        yield* runReader({
+          homePath: "",
+          ptyAdapter: PtyAdapter.PtyAdapter.of({ spawn: () => Effect.succeed(pty.process) }),
+          httpClient,
+        }),
+      ).toEqual({
+        fiveHour: { usedPercent: 19, resetsAt: expect.any(String) },
+        weekly: { usedPercent: 67, resetsAt: expect.any(String) },
+      });
+    });
+  });
+
+  it.effect("runs a resolved Windows Claude command shim through cmd.exe", () => {
+    const pty = makePty((data, emit) => {
+      if (data === "/usage\n") emit(panel);
+    });
+    let spawnInput: PtyAdapter.PtySpawnInput | undefined;
+    const httpClient = HttpClient.make(() => Effect.die("HTTP fallback should not run"));
+
+    return Effect.gen(function* () {
+      yield* runReader({
+        homePath: "",
+        environment: { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+        ptyAdapter: PtyAdapter.PtyAdapter.of({
+          spawn: (input) =>
+            Effect.sync(() => {
+              spawnInput = input;
+              return pty.process;
+            }),
+        }),
+        httpClient,
+      }).pipe(
+        Effect.provideService(HostProcessPlatform, "win32"),
+        Effect.provideService(
+          SpawnExecutableResolution,
+          () => "C:\\Program Files\\Anthropic\\claude.cmd",
+        ),
+      );
+
+      expect(spawnInput).toEqual({
+        shell: "C:\\Windows\\System32\\cmd.exe",
+        args: ["/d", "/s", "/c", '^"C:\\Program^ Files\\Anthropic\\claude.cmd^"'],
+        cwd: expect.any(String),
+        cols: 100,
+        rows: 30,
+        env: { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+      });
+    });
+  });
+
   it.effect("falls back to OAuth HTTP when the PTY probe cannot start", () => {
     const httpCalls: Array<string> = [];
     const httpClient = HttpClient.make((request) =>
@@ -196,6 +260,44 @@ it.layer(NodeServices.layer)("readClaudeUsageLimits", (it) => {
         weekly: { usedPercent: 46, resetsAt: "2026-08-05T12:00:00.000Z" },
       });
       expect(httpCalls).toEqual(["https://api.anthropic.com/api/oauth/usage"]);
+    }).pipe(Effect.scoped);
+  });
+
+  it.effect("falls back to OAuth HTTP when the PTY panel is invalid", () => {
+    let exitListener: ((event: PtyAdapter.PtyExitEvent) => void) | undefined;
+    const pty = makePty((data, emit) => {
+      if (data === "/usage\n") emit("Loading usage…");
+      exitListener?.({ exitCode: 1, signal: null });
+    });
+    const originalOnExit = pty.process.onExit;
+    pty.process.onExit = (listener) => {
+      exitListener = listener;
+      return originalOnExit(listener);
+    };
+    const httpClient = HttpClient.make((request) =>
+      Effect.succeed(HttpClientResponse.fromWeb(request, Response.json(oauthUsage))),
+    );
+
+    return Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const homePath = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-usage-home-" });
+      yield* fs.writeFileString(
+        path.join(homePath, ".credentials.json"),
+        '{"claudeAiOauth":{"accessToken":"sk-ant-oat-test"}}',
+      );
+
+      expect(
+        yield* readClaudeUsageLimits({
+          config: { homePath, binaryPath: "fake-claude" },
+          environment: {},
+          childProcessSpawner: unusedChildProcessSpawner,
+          ptyAdapter: PtyAdapter.PtyAdapter.of({ spawn: () => Effect.succeed(pty.process) }),
+        }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient)),
+      ).toEqual({
+        fiveHour: { usedPercent: 31, resetsAt: "2026-08-01T22:00:00.000Z" },
+        weekly: { usedPercent: 46, resetsAt: "2026-08-05T12:00:00.000Z" },
+      });
     }).pipe(Effect.scoped);
   });
 

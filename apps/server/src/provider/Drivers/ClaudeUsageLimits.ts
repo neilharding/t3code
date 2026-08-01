@@ -15,6 +15,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { expandHomePath } from "../../pathExpansion.ts";
 import * as PtyAdapter from "../../terminal/PtyAdapter.ts";
 import { makeClaudeEnvironment } from "./ClaudeHome.ts";
+import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 const CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const CLAUDE_USAGE_PTY_COLS = 100;
@@ -330,6 +331,9 @@ const readClaudeOAuthToken = Effect.fn("readClaudeOAuthToken")(function* (input:
 const hasUsageLimits = (limits: ProviderUsageLimitsUpdate): boolean =>
   limits.fiveHour !== undefined || limits.weekly !== undefined;
 
+const hasCompleteUsagePanel = (limits: ProviderUsageLimitsUpdate): boolean =>
+  limits.fiveHour !== undefined && limits.weekly !== undefined;
+
 const probeClaudeUsagePanel = Effect.fn("probeClaudeUsagePanel")(function* (input: {
   readonly config: Pick<ClaudeSettings, "binaryPath" | "homePath">;
   readonly environment: NodeJS.ProcessEnv;
@@ -340,11 +344,19 @@ const probeClaudeUsagePanel = Effect.fn("probeClaudeUsagePanel")(function* (inpu
   const fileSystem = yield* FileSystem.FileSystem;
   const nowEpochMs = yield* Clock.currentTimeMillis;
   const claudeEnvironment = yield* makeClaudeEnvironment(input.config, input.environment);
+  const resolvedCommand = yield* resolveSpawnCommand(input.config.binaryPath, [], {
+    env: claudeEnvironment,
+  });
   const probeDirectory = yield* fileSystem.makeTempDirectoryScoped({
     prefix: "t3-claude-usage-probe-",
   });
   const process = yield* ptyAdapter.spawn({
-    shell: input.config.binaryPath,
+    shell: resolvedCommand.shell
+      ? (claudeEnvironment.ComSpec ?? "cmd.exe")
+      : resolvedCommand.command,
+    args: resolvedCommand.shell
+      ? ["/d", "/s", "/c", resolvedCommand.command, ...resolvedCommand.args]
+      : resolvedCommand.args,
     cwd: probeDirectory,
     cols: CLAUDE_USAGE_PTY_COLS,
     rows: CLAUDE_USAGE_PTY_ROWS,
@@ -361,13 +373,13 @@ const probeClaudeUsagePanel = Effect.fn("probeClaudeUsagePanel")(function* (inpu
 
   return yield* Effect.sync(() => {
     unsubscribeData = process.onData((data) => {
-      output += data;
-      if (output.length > MAX_CLAUDE_USAGE_PTY_OUTPUT_LENGTH) {
+      if (data.length > MAX_CLAUDE_USAGE_PTY_OUTPUT_LENGTH - output.length) {
         finish(undefined);
         return;
       }
+      output += data;
       const limits = parseClaudeUsagePanel(output, nowEpochMs);
-      if (hasUsageLimits(limits)) finish(limits);
+      if (hasCompleteUsagePanel(limits)) finish(limits);
     });
     unsubscribeExit = process.onExit(() => finish(undefined));
     process.write("/usage\n");

@@ -99,7 +99,7 @@ Run: `vp run --filter @t3tools/contracts typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add packages/contracts/src/providerUsageLimits.ts packages/contracts/src/providerUsageLimits.test.ts packages/contracts/src/providerRuntime.ts packages/contracts/src/providerRuntime.test.ts packages/contracts/src/rpc.ts packages/contracts/src/index.ts
@@ -115,7 +115,7 @@ git commit -m "feat(contracts): type provider usage limits"
 - Modify: `apps/server/src/provider/Layers/ClaudeAdapter.ts`
 - Modify: `apps/server/src/provider/Layers/ClaudeAdapter.test.ts`
 
-- [ ] **Step 1: Add failing Codex normalization tests**
+- [x] **Step 1: Add failing Codex normalization tests**
 
 Cover:
 
@@ -127,13 +127,13 @@ Cover:
 - finite percentages outside the provider contract omit only the affected window;
 - the emitted canonical payload is `{ limits }`, while `raw` retains the native payload for existing internal diagnostics.
 
-- [ ] **Step 2: Run the Codex adapter test and confirm failure**
+- [x] **Step 2: Run the Codex adapter test and confirm failure**
 
 Run: `vp test run apps/server/src/provider/Layers/CodexAdapter.test.ts`
 
 Expected: FAIL because the adapter still emits `{ rateLimits: unknown }`.
 
-- [ ] **Step 3: Implement a pure Codex normalizer and use it in the notification branch**
+- [x] **Step 3: Implement a pure Codex normalizer and use it in the notification branch**
 
 Add an exported-for-test helper near the existing event projection helpers:
 
@@ -145,7 +145,7 @@ export function normalizeCodexUsageLimits(
 
 Match `300` and `10080` minutes first. When both durations are absent, map primary to five-hour and secondary to weekly. Return no canonical event if neither usable window exists.
 
-- [ ] **Step 4: Add failing Claude normalization tests**
+- [x] **Step 4: Add failing Claude normalization tests**
 
 Cover:
 
@@ -157,13 +157,13 @@ Cover:
 - finite utilization outside the SDK contract emits no usage window;
 - sparse Claude events preserve exactly one normalized window for server-side merging.
 
-- [ ] **Step 5: Run the Claude adapter test and confirm failure**
+- [x] **Step 5: Run the Claude adapter test and confirm failure**
 
 Run: `vp test run apps/server/src/provider/Layers/ClaudeAdapter.test.ts`
 
 Expected: FAIL because the adapter still forwards the SDK message as unknown data.
 
-- [ ] **Step 6: Implement a pure Claude normalizer and use it in `rate_limit_event`**
+- [x] **Step 6: Implement a pure Claude normalizer and use it in `rate_limit_event`**
 
 Add:
 
@@ -179,7 +179,11 @@ Run: `vp test run apps/server/src/provider/Layers/CodexAdapter.test.ts apps/serv
 
 Expected: PASS.
 
-Run: `vp run --filter @t3tools/server typecheck`
+The focused adapter tests and targeted adapter lint pass. The server package typecheck is deferred
+until Task 4 installs authorization and a handler for the RPC contract introduced in Task 1; until
+then the RPC group is intentionally incomplete.
+
+Run: `vp run --filter t3 typecheck`
 
 Expected: PASS.
 
@@ -296,7 +300,7 @@ Run: `vp test run apps/server/src/provider/providerUsageLimits.test.ts apps/serv
 
 Expected: PASS.
 
-Run: `vp run --filter @t3tools/server typecheck`
+Run: `vp run --filter t3 typecheck`
 
 Expected: PASS.
 
@@ -361,7 +365,7 @@ Run: `vp test run apps/server/src/auth/RpcAuthorization.test.ts apps/server/src/
 
 Expected: PASS.
 
-Run: `vp run --filter @t3tools/server typecheck`
+Run: `vp run --filter t3 typecheck`
 
 Expected: PASS.
 
@@ -542,7 +546,7 @@ Run:
 
 ```bash
 vp run --filter @t3tools/contracts typecheck
-vp run --filter @t3tools/server typecheck
+vp run --filter t3 typecheck
 vp run --filter @t3tools/client-runtime typecheck
 vp run --filter @t3tools/web typecheck
 ```

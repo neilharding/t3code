@@ -45,7 +45,7 @@ import {
   type CodexSessionRuntimeShape,
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
-import { makeCodexAdapter } from "./CodexAdapter.ts";
+import { makeCodexAdapter, normalizeCodexUsageLimits } from "./CodexAdapter.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
@@ -57,6 +57,76 @@ const asThreadId = (value: string): ThreadId => ThreadId.make(value);
 const asTurnId = (value: string): TurnId => TurnId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asItemId = (value: string): ProviderItemId => ProviderItemId.make(value);
+
+it("normalizes Codex usage windows by their reported durations", () => {
+  NodeAssert.deepEqual(
+    normalizeCodexUsageLimits({
+      primary: {
+        usedPercent: 70,
+        resetsAt: 1_767_830_400,
+        windowDurationMins: 10_080,
+      },
+      secondary: {
+        usedPercent: 20,
+        resetsAt: 1_767_243_600,
+        windowDurationMins: 300,
+      },
+    }),
+    {
+      fiveHour: {
+        usedPercent: 20,
+        resetsAt: "2026-01-01T05:00:00.000Z",
+      },
+      weekly: {
+        usedPercent: 70,
+        resetsAt: "2026-01-08T00:00:00.000Z",
+      },
+    },
+  );
+});
+
+it("falls back to Codex primary and secondary positions when durations are absent", () => {
+  NodeAssert.deepEqual(
+    normalizeCodexUsageLimits({
+      primary: {
+        usedPercent: 15,
+        resetsAt: 1_767_243_600,
+      },
+      secondary: {
+        usedPercent: 40,
+        resetsAt: 1_767_830_400,
+      },
+    }),
+    {
+      fiveHour: {
+        usedPercent: 15,
+        resetsAt: "2026-01-01T05:00:00.000Z",
+      },
+      weekly: {
+        usedPercent: 40,
+        resetsAt: "2026-01-08T00:00:00.000Z",
+      },
+    },
+  );
+});
+
+it("omits Codex usage windows with percentages outside the provider contract", () => {
+  NodeAssert.deepEqual(
+    normalizeCodexUsageLimits({
+      primary: {
+        usedPercent: 101,
+        resetsAt: 1_767_243_600,
+        windowDurationMins: 300,
+      },
+      secondary: {
+        usedPercent: -1,
+        resetsAt: 1_767_830_400,
+        windowDurationMins: 10_080,
+      },
+    }),
+    {},
+  );
+});
 
 class FakeCodexRuntime implements CodexSessionRuntimeShape {
   private readonly eventQueue = Effect.runSync(Queue.unbounded<ProviderEvent>());
@@ -512,6 +582,54 @@ function startLifecycleRuntime() {
 }
 
 lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
+  it.effect("emits normalized Codex account usage limits", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-account-rate-limits"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "account/rateLimits/updated",
+        threadId: asThreadId("thread-1"),
+        payload: {
+          rateLimits: {
+            primary: {
+              usedPercent: 20,
+              resetsAt: 1_767_243_600,
+              windowDurationMins: 300,
+            },
+            secondary: {
+              usedPercent: 70,
+              resetsAt: 1_767_830_400,
+              windowDurationMins: 10_080,
+            },
+          },
+        },
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") return;
+      NodeAssert.equal(firstEvent.value.type, "account.rate-limits.updated");
+      if (firstEvent.value.type !== "account.rate-limits.updated") return;
+      NodeAssert.deepEqual(firstEvent.value.payload, {
+        limits: {
+          fiveHour: {
+            usedPercent: 20,
+            resetsAt: "2026-01-01T05:00:00.000Z",
+          },
+          weekly: {
+            usedPercent: 70,
+            resetsAt: "2026-01-08T00:00:00.000Z",
+          },
+        },
+      });
+    }),
+  );
+
   it.effect("maps completed agent message items to canonical item.completed events", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();

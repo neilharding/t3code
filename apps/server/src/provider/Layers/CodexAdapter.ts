@@ -15,6 +15,7 @@ import {
   type ProviderEvent,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
+  type ProviderUsageLimitsUpdate,
   type ProviderRequestKind,
   type ThreadTokenUsageSnapshot,
   type ProviderUserInputAnswers,
@@ -26,10 +27,12 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
+import * as DateTime from "effect/DateTime";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Queue from "effect/Queue";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 import * as Stream from "effect/Stream";
@@ -68,6 +71,64 @@ const isCodexSessionRuntimeThreadIdMissingError = Schema.is(
   CodexSessionRuntimeThreadIdMissingError,
 );
 const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
+
+type CodexRateLimitsSnapshot =
+  EffectCodexSchema.V2AccountRateLimitsUpdatedNotification["rateLimits"];
+
+const normalizeCodexUsageWindow = (window: NonNullable<CodexRateLimitsSnapshot["primary"]>) => {
+  if (
+    window.resetsAt === undefined ||
+    window.resetsAt === null ||
+    window.usedPercent < 0 ||
+    window.usedPercent > 100
+  ) {
+    return undefined;
+  }
+  return Option.match(DateTime.make(window.resetsAt * 1_000), {
+    onNone: () => undefined,
+    onSome: (resetsAt) => ({
+      usedPercent: window.usedPercent,
+      resetsAt: DateTime.formatIso(resetsAt),
+    }),
+  });
+};
+
+export function normalizeCodexUsageLimits(
+  snapshot: CodexRateLimitsSnapshot,
+): ProviderUsageLimitsUpdate {
+  const limits: {
+    fiveHour?: ReturnType<typeof normalizeCodexUsageWindow>;
+    weekly?: ReturnType<typeof normalizeCodexUsageWindow>;
+  } = {};
+
+  for (const window of [snapshot.primary, snapshot.secondary]) {
+    if (window?.windowDurationMins === 300) {
+      limits.fiveHour = normalizeCodexUsageWindow(window);
+    } else if (window?.windowDurationMins === 10_080) {
+      limits.weekly = normalizeCodexUsageWindow(window);
+    }
+  }
+
+  if (
+    limits.fiveHour === undefined &&
+    (snapshot.primary?.windowDurationMins === undefined ||
+      snapshot.primary.windowDurationMins === null)
+  ) {
+    limits.fiveHour = snapshot.primary ? normalizeCodexUsageWindow(snapshot.primary) : undefined;
+  }
+  if (
+    limits.weekly === undefined &&
+    (snapshot.secondary?.windowDurationMins === undefined ||
+      snapshot.secondary.windowDurationMins === null)
+  ) {
+    limits.weekly = snapshot.secondary ? normalizeCodexUsageWindow(snapshot.secondary) : undefined;
+  }
+
+  return {
+    ...(limits.fiveHour ? { fiveHour: limits.fiveHour } : {}),
+    ...(limits.weekly ? { weekly: limits.weekly } : {}),
+  };
+}
 
 const PROVIDER = ProviderDriverKind.make("codex");
 
@@ -1125,16 +1186,22 @@ function mapToRuntimeEvents(
   }
 
   if (event.method === "account/rateLimits/updated") {
-    if (!readPayload(EffectCodexSchema.V2AccountRateLimitsUpdatedNotification, event.payload)) {
+    const payload = readPayload(
+      EffectCodexSchema.V2AccountRateLimitsUpdatedNotification,
+      event.payload,
+    );
+    if (!payload) {
+      return [];
+    }
+    const limits = normalizeCodexUsageLimits(payload.rateLimits);
+    if (limits.fiveHour === undefined && limits.weekly === undefined) {
       return [];
     }
     return [
       {
         type: "account.rate-limits.updated",
         ...runtimeEventBase(event, canonicalThreadId),
-        payload: {
-          rateLimits: event.payload ?? {},
-        },
+        payload: { limits },
       },
     ];
   }

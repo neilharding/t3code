@@ -3,6 +3,7 @@ import * as NodeOS from "node:os";
 import type { ClaudeSettings, ProviderUsageLimitsUpdate } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -24,6 +25,39 @@ const CLAUDE_USAGE_PTY_TIMEOUT = "2 seconds";
 const MAX_CLAUDE_USAGE_PTY_OUTPUT_LENGTH = 64 * 1024;
 const decodeUnknownJson = Schema.decodeUnknownEffect(Schema.UnknownFromJsonString);
 const KEYCHAIN_ACCOUNT_PATTERN = /^[A-Za-z0-9._-]+$/u;
+const CLAUDE_MONTHS: Readonly<Record<string, number>> = {
+  january: 1,
+  jan: 1,
+  february: 2,
+  feb: 2,
+  march: 3,
+  mar: 3,
+  april: 4,
+  apr: 4,
+  may: 5,
+  june: 6,
+  jun: 6,
+  july: 7,
+  jul: 7,
+  august: 8,
+  aug: 8,
+  september: 9,
+  sep: 9,
+  sept: 9,
+  october: 10,
+  oct: 10,
+  november: 11,
+  nov: 11,
+  december: 12,
+  dec: 12,
+};
+const LOCAL_TIME_ZONE = DateTime.zoneMakeLocal();
+type DateTimeInput = Parameters<typeof DateTime.makeZoned>[0];
+
+const makeLocalDateTime = (input: DateTimeInput): DateTime.Zoned | undefined =>
+  Option.getOrUndefined(
+    DateTime.makeZoned(input, { timeZone: LOCAL_TIME_ZONE, adjustForTimeZone: true }),
+  );
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -106,17 +140,23 @@ const parseRelativeReset = (description: string, nowEpochMs: number): number | u
   for (const match of description.matchAll(units)) {
     consumed += match[0];
     const amount = Number(match.groups?.amount);
-    const unit = match.groups?.unit.toLowerCase();
+    const unit = match.groups?.unit;
+    if (unit === undefined) return undefined;
+    const normalizedUnit = unit.toLowerCase();
     const multiplier =
-      unit === "d" || unit === "day" || unit === "days"
+      normalizedUnit === "d" || normalizedUnit === "day" || normalizedUnit === "days"
         ? 86_400_000
-        : unit === "h" || unit === "hr" || unit === "hrs" || unit === "hour" || unit === "hours"
+        : normalizedUnit === "h" ||
+            normalizedUnit === "hr" ||
+            normalizedUnit === "hrs" ||
+            normalizedUnit === "hour" ||
+            normalizedUnit === "hours"
           ? 3_600_000
-          : unit === "m" ||
-              unit === "min" ||
-              unit === "mins" ||
-              unit === "minute" ||
-              unit === "minutes"
+          : normalizedUnit === "m" ||
+              normalizedUnit === "min" ||
+              normalizedUnit === "mins" ||
+              normalizedUnit === "minute" ||
+              normalizedUnit === "minutes"
             ? 60_000
             : 1_000;
     if (!Number.isFinite(amount)) return undefined;
@@ -135,7 +175,9 @@ const parseRelativeReset = (description: string, nowEpochMs: number): number | u
 const resolvePanelReset = (line: string, nowEpochMs: number): string | undefined => {
   const match = /^\s*resets\s+(.+?)\s*$/iu.exec(line);
   if (!match || !Number.isFinite(nowEpochMs)) return undefined;
-  const description = match[1].replace(/\s+\([^()]*\)\s*$/u, "");
+  const descriptionText = match[1];
+  if (descriptionText === undefined) return undefined;
+  const description = descriptionText.replace(/\s+\([^()]*\)\s*$/u, "");
   let resetEpochMs: number | undefined;
 
   if (/^in\s+/iu.test(description)) {
@@ -147,10 +189,15 @@ const resolvePanelReset = (line: string, nowEpochMs: number): string | undefined
         description,
       );
     if (!timeAtEnd) return undefined;
-    const clockTime = parseClockTime(timeAtEnd[2]);
+    const timeText = timeAtEnd[2];
+    if (timeText === undefined) return undefined;
+    const clockTime = parseClockTime(timeText);
     if (!clockTime) return undefined;
-    const now = new Date(nowEpochMs);
-    const dateDescription = timeAtEnd[1].trim();
+    const dateText = timeAtEnd[1];
+    if (dateText === undefined) return undefined;
+    const dateDescription = dateText.trim();
+    const now = DateTime.makeZonedUnsafe(nowEpochMs, { timeZone: LOCAL_TIME_ZONE });
+    const nowParts = DateTime.toParts(now);
     const weekday = /^(Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday)$/iu.exec(
       dateDescription,
     );
@@ -159,6 +206,8 @@ const resolvePanelReset = (line: string, nowEpochMs: number): string | undefined
         dateDescription ?? "",
       );
     if (weekday) {
+      const weekdayName = weekday[1];
+      if (weekdayName === undefined) return undefined;
       const weekdayIndex = [
         "sunday",
         "monday",
@@ -167,36 +216,45 @@ const resolvePanelReset = (line: string, nowEpochMs: number): string | undefined
         "thursday",
         "friday",
         "saturday",
-      ].indexOf(weekday[1].toLowerCase());
-      const candidate = new Date(nowEpochMs);
-      candidate.setHours(clockTime.hours, clockTime.minutes, 0, 0);
-      candidate.setDate(candidate.getDate() + ((weekdayIndex - candidate.getDay() + 7) % 7));
-      if (candidate.getTime() <= nowEpochMs) return undefined;
-      resetEpochMs = candidate.getTime();
+      ].indexOf(weekdayName.toLowerCase());
+      const candidate = makeLocalDateTime({
+        year: nowParts.year,
+        month: nowParts.month,
+        day: nowParts.day,
+        hour: clockTime.hours,
+        minute: clockTime.minutes,
+      });
+      if (candidate === undefined) return undefined;
+      const candidateWeekday = DateTime.toParts(candidate).weekDay;
+      const adjustedCandidate = DateTime.add(candidate, {
+        days: (weekdayIndex - candidateWeekday + 7) % 7,
+      });
+      resetEpochMs = DateTime.toEpochMillis(adjustedCandidate);
+      if (resetEpochMs <= nowEpochMs) return undefined;
     } else if (calendarDate) {
-      const monthIndex = new Date(`${calendarDate[1]} 1, 2000`).getMonth();
-      const day = Number(calendarDate[2]);
+      const monthText = calendarDate[1];
+      const dayText = calendarDate[2];
+      if (monthText === undefined || dayText === undefined) return undefined;
+      const month = CLAUDE_MONTHS[monthText.toLowerCase()];
+      const day = Number(dayText);
       const providedYear = calendarDate[3] === undefined ? undefined : Number(calendarDate[3]);
-      const candidate = new Date(
-        providedYear ?? now.getFullYear(),
-        monthIndex,
+      if (month === undefined || !Number.isInteger(day)) return undefined;
+      const candidate = makeLocalDateTime({
+        year: providedYear ?? nowParts.year,
+        month,
         day,
-        clockTime.hours,
-        clockTime.minutes,
-      );
-      if (
-        candidate.getMonth() !== monthIndex ||
-        candidate.getDate() !== day ||
-        (providedYear !== undefined && candidate.getFullYear() !== providedYear)
-      ) {
-        return undefined;
-      }
-      if (providedYear === undefined && candidate.getTime() <= nowEpochMs) return undefined;
-      resetEpochMs = candidate.getTime();
+        hour: clockTime.hours,
+        minute: clockTime.minutes,
+      });
+      if (candidate === undefined) return undefined;
+      resetEpochMs = DateTime.toEpochMillis(candidate);
+      if (providedYear === undefined && resetEpochMs <= nowEpochMs) return undefined;
     }
   }
-  if (!Number.isFinite(resetEpochMs) || resetEpochMs <= nowEpochMs) return undefined;
-  return new Date(resetEpochMs).toISOString();
+  if (resetEpochMs === undefined || !Number.isFinite(resetEpochMs) || resetEpochMs <= nowEpochMs) {
+    return undefined;
+  }
+  return DateTime.formatIso(DateTime.makeUnsafe(resetEpochMs));
 };
 
 const parsePanelWindow = (lines: ReadonlyArray<string>, label: string, nowEpochMs: number) => {
@@ -214,7 +272,9 @@ const parsePanelWindow = (lines: ReadonlyArray<string>, label: string, nowEpochM
   );
   const percentageIndex = rowLines.findIndex((line) => parsePanelPercentage(line) !== undefined);
   if (percentageIndex < 0) return undefined;
-  const usedPercent = parsePanelPercentage(rowLines[percentageIndex]);
+  const percentageLine = rowLines[percentageIndex];
+  if (percentageLine === undefined) return undefined;
+  const usedPercent = parsePanelPercentage(percentageLine);
   const resetLine = rowLines.slice(percentageIndex + 1).find((line) => /^\s*resets\b/iu.test(line));
   const resetsAt = resetLine ? resolvePanelReset(resetLine, nowEpochMs) : undefined;
   return usedPercent === undefined || resetsAt === undefined
@@ -356,7 +416,7 @@ const probeClaudeUsagePanel = Effect.fn("probeClaudeUsagePanel")(function* (inpu
       : resolvedCommand.command,
     args: resolvedCommand.shell
       ? ["/d", "/s", "/c", resolvedCommand.command, ...resolvedCommand.args]
-      : resolvedCommand.args,
+      : [...resolvedCommand.args],
     cwd: probeDirectory,
     cols: CLAUDE_USAGE_PTY_COLS,
     rows: CLAUDE_USAGE_PTY_ROWS,

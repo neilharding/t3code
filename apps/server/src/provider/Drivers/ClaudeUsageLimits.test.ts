@@ -4,6 +4,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Path from "effect/Path";
 import * as Sink from "effect/Sink";
+import * as DateTime from "effect/DateTime";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientResponse } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -167,7 +168,9 @@ it.layer(NodeServices.layer)("readClaudeUsageLimits", (it) => {
   });
 
   it.effect("waits for the weekly panel when the two limits arrive in separate chunks", () => {
-    const [session, weekly] = panel.split("Current week (all models)\n");
+    const weeklyStart = panel.indexOf("Current week (all models)\n");
+    const session = panel.slice(0, weeklyStart);
+    const weekly = panel.slice(weeklyStart);
     const pty = makePty((data, emit) => {
       if (data !== "/usage\n") return;
       emit(session);
@@ -325,7 +328,12 @@ it.layer(NodeServices.layer)("readClaudeUsageLimits", (it) => {
 });
 
 describe("parseClaudeUsagePanel", () => {
-  const nowEpochMs = new Date("2026-08-01T16:00:00.000Z").getTime();
+  const localTimeZone = DateTime.zoneMakeLocal();
+  const localIso = (input: Parameters<typeof DateTime.makeZoned>[0]): string =>
+    DateTime.formatIso(
+      DateTime.makeZonedUnsafe(input, { timeZone: localTimeZone, adjustForTimeZone: true }),
+    );
+  const nowEpochMs = DateTime.toEpochMillis(DateTime.makeUnsafe("2026-08-01T16:00:00.000Z"));
 
   it("maps the latest session and all-model weekly rows with relative resets", () => {
     expect(
@@ -363,8 +371,14 @@ describe("parseClaudeUsagePanel", () => {
         nowEpochMs,
       ),
     ).toEqual({
-      fiveHour: { usedPercent: 24.5, resetsAt: new Date(2026, 7, 3, 10, 30).toISOString() },
-      weekly: { usedPercent: 42, resetsAt: new Date(2026, 7, 5, 16, 15).toISOString() },
+      fiveHour: {
+        usedPercent: 24.5,
+        resetsAt: localIso({ year: 2026, month: 8, day: 3, hour: 10, minute: 30 }),
+      },
+      weekly: {
+        usedPercent: 42,
+        resetsAt: localIso({ year: 2026, month: 8, day: 5, hour: 16, minute: 15 }),
+      },
     });
   });
 
@@ -382,12 +396,18 @@ describe("parseClaudeUsagePanel", () => {
         nowEpochMs,
       ),
     ).toEqual({
-      weekly: { usedPercent: 42, resetsAt: new Date(2026, 10, 5, 16, 15).toISOString() },
+      weekly: {
+        usedPercent: 42,
+        resetsAt: localIso({ year: 2026, month: 11, day: 5, hour: 16, minute: 15 }),
+      },
     });
   });
 
   it("omits reset rows that would require rolling an undated value forward", () => {
-    const weekly = { usedPercent: 42, resetsAt: new Date(2026, 7, 5, 16, 15).toISOString() };
+    const weekly = {
+      usedPercent: 42,
+      resetsAt: localIso({ year: 2026, month: 8, day: 5, hour: 16, minute: 15 }),
+    };
 
     for (const reset of ["Saturday at 10:30 AM", "Jul 5 at 4:15 PM"]) {
       expect(

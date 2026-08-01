@@ -19,6 +19,16 @@ const DEFAULT_COLORS = {
   claudeAgent: "#f97316",
 } as const;
 
+export const PROVIDER_USAGE_TOOLTIP_DELAY = 0;
+export const PROVIDER_USAGE_TOOLTIP_CLOSE_DELAY = 0;
+
+export function resolveProviderUsageTooltipOpen(
+  currentOpen: boolean,
+  requestedOpen: boolean | "toggle",
+): boolean {
+  return requestedOpen === "toggle" ? !currentOpen : requestedOpen;
+}
+
 interface ProviderUsageLimitIndicatorBase {
   readonly providerInstanceId: ProviderInstanceId;
   readonly driver: "codex" | "claudeAgent";
@@ -241,16 +251,21 @@ function ProviderUsageLimitIndicatorChip(props: {
       : "waiting for real usage data";
 
   return (
-    <Tooltip open={open} onOpenChange={setOpen}>
+    <Tooltip
+      open={open}
+      onOpenChange={(nextOpen) =>
+        setOpen((wasOpen) => resolveProviderUsageTooltipOpen(wasOpen, nextOpen))
+      }
+    >
       <TooltipTrigger
         closeOnClick={false}
-        delay={0}
-        closeDelay={0}
+        delay={PROVIDER_USAGE_TOOLTIP_DELAY}
+        closeDelay={PROVIDER_USAGE_TOOLTIP_CLOSE_DELAY}
         render={
           <button
             type="button"
             aria-label={`${indicator.label} usage: ${usageLabel}`}
-            onClick={() => setOpen((wasOpen) => !wasOpen)}
+            onClick={() => setOpen((wasOpen) => resolveProviderUsageTooltipOpen(wasOpen, "toggle"))}
             className="flex h-7 min-w-0 items-center justify-center gap-1.5 rounded-md border border-sidebar-border/70 bg-sidebar-control-surface px-2 text-[11px] font-medium tabular-nums text-sidebar-foreground hover:bg-sidebar-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
           />
         }

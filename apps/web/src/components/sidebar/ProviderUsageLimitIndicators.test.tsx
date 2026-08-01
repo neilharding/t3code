@@ -9,9 +9,12 @@ import {
 
 import {
   buildProviderUsageLimitIndicators,
+  PROVIDER_USAGE_TOOLTIP_CLOSE_DELAY,
+  PROVIDER_USAGE_TOOLTIP_DELAY,
   ProviderUsageLimitDetail,
   ProviderUsageLimitIndicatorsView,
   ProviderUsageLimitPendingDetail,
+  resolveProviderUsageTooltipOpen,
 } from "./ProviderUsageLimitIndicators";
 
 const NOW = Date.parse("2026-07-31T12:00:00.000Z");
@@ -144,6 +147,26 @@ describe("buildProviderUsageLimitIndicators", () => {
     expect(
       buildProviderUsageLimitIndicators([], [makeProvider(claudeId, claude)], NOW),
     ).toMatchObject([{ providerInstanceId: claudeId, state: "pending", color: "#f97316" }]);
+  });
+});
+
+describe("resolveProviderUsageTooltipOpen", () => {
+  it("toggles the controlled tooltip open on successive chip clicks", () => {
+    expect(resolveProviderUsageTooltipOpen(false, "toggle")).toBe(true);
+    expect(resolveProviderUsageTooltipOpen(true, "toggle")).toBe(false);
+  });
+
+  it("uses an open change from hover or focus", () => {
+    expect(resolveProviderUsageTooltipOpen(false, true)).toBe(true);
+  });
+
+  it("uses a false open change from Escape dismissal", () => {
+    expect(resolveProviderUsageTooltipOpen(true, false)).toBe(false);
+  });
+
+  it("uses the shortest supported hover delays", () => {
+    expect(PROVIDER_USAGE_TOOLTIP_DELAY).toBe(0);
+    expect(PROVIDER_USAGE_TOOLTIP_CLOSE_DELAY).toBe(0);
   });
 });
 

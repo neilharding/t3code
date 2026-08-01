@@ -4493,52 +4493,54 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("streams full provider usage limit snapshots without raw provider payloads", () =>
-    Effect.gen(function* () {
-      const initialEntries = [
-        {
-          providerInstanceId: ProviderInstanceId.make("codex_personal"),
-          driver: ProviderDriverKind.make("codex"),
-          observedAt: "2026-07-31T12:00:00.000Z",
-          fiveHour: { usedPercent: 20, resetsAt: "2026-07-31T17:00:00.000Z" },
-          weekly: { usedPercent: 60, resetsAt: "2026-08-07T12:00:00.000Z" },
-        },
-      ];
-      const updatedEntries = [
-        {
-          ...initialEntries[0]!,
-          observedAt: "2026-07-31T12:05:00.000Z",
-          fiveHour: { usedPercent: 25, resetsAt: "2026-07-31T17:00:00.000Z" },
-        },
-      ];
-      yield* buildAppUnderTest({
-        layers: {
-          providerUsageLimits: {
-            getSnapshots: Effect.succeed(initialEntries),
-            streamChanges: Stream.make(initialEntries, updatedEntries),
+  it.effect(
+    "streams partial provider usage limit snapshots to v2 clients without raw payloads",
+    () =>
+      Effect.gen(function* () {
+        const initialEntries = [
+          {
+            providerInstanceId: ProviderInstanceId.make("codex_personal"),
+            driver: ProviderDriverKind.make("codex"),
+            observedAt: "2026-07-31T12:00:00.000Z",
+            fiveHour: { usedPercent: 20, resetsAt: "2026-07-31T17:00:00.000Z" },
+            weekly: { usedPercent: 60, resetsAt: "2026-08-07T12:00:00.000Z" },
           },
-        },
-      });
+        ];
+        const updatedEntries = [
+          {
+            ...initialEntries[0]!,
+            observedAt: "2026-07-31T12:05:00.000Z",
+            fiveHour: { usedPercent: 25, resetsAt: "2026-07-31T17:00:00.000Z" },
+          },
+        ];
+        yield* buildAppUnderTest({
+          layers: {
+            providerUsageLimits: {
+              getSnapshots: Effect.succeed(initialEntries),
+              streamChanges: Stream.make(initialEntries, updatedEntries),
+            },
+          },
+        });
 
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const events = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[WS_METHODS.subscribeProviderUsageLimits]({}).pipe(
-            Stream.take(2),
-            Stream.runCollect,
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const events = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.subscribeProviderUsageLimits]({ version: 2 }).pipe(
+              Stream.take(2),
+              Stream.runCollect,
+            ),
           ),
-        ),
-      );
+        );
 
-      assert.deepEqual(events, [
-        { version: 1, type: "snapshot", entries: initialEntries },
-        { version: 1, type: "snapshot", entries: updatedEntries },
-      ]);
-      for (const event of events) {
-        assert.equal(Object.hasOwn(event, "raw"), false);
-        for (const entry of event.entries) assert.equal(Object.hasOwn(entry, "raw"), false);
-      }
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+        assert.deepEqual(events, [
+          { version: 2, type: "snapshot", entries: initialEntries },
+          { version: 2, type: "snapshot", entries: updatedEntries },
+        ]);
+        for (const event of events) {
+          assert.equal(Object.hasOwn(event, "raw"), false);
+          for (const entry of event.entries) assert.equal(Object.hasOwn(entry, "raw"), false);
+        }
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("routes websocket rpc subscribeServerConfig emits provider status updates", () =>

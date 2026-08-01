@@ -78,6 +78,7 @@ describe("readCodexUsageLimits", () => {
             windowDurationMins: 10_080,
           },
         },
+        replaceExisting: true,
       },
     );
     NodeAssert.deepStrictEqual(calls, [{ method: "account/rateLimits/read", payload: undefined }]);

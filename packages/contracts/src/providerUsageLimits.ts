@@ -35,9 +35,32 @@ export const ProviderUsageLimitsSnapshot = Schema.Struct({
 });
 export type ProviderUsageLimitsSnapshot = typeof ProviderUsageLimitsSnapshot.Type;
 
-export const ProviderUsageLimitsStreamEvent = Schema.Struct({
+export const ProviderUsageLimitsSnapshotV1 = Schema.Struct({
+  providerInstanceId: ProviderInstanceId,
+  driver: ProviderDriverKind,
+  observedAt: UsageLimitIsoDateTime,
+  fiveHour: ProviderUsageLimitWindow,
+  weekly: ProviderUsageLimitWindow,
+});
+export type ProviderUsageLimitsSnapshotV1 = typeof ProviderUsageLimitsSnapshotV1.Type;
+
+export const ProviderUsageLimitsSubscription = Schema.Struct({
+  version: Schema.optionalKey(Schema.Literal(2)),
+});
+
+const ProviderUsageLimitsStreamEventV1 = Schema.Struct({
   version: Schema.Literal(1),
+  type: Schema.Literal("snapshot"),
+  entries: Schema.Array(ProviderUsageLimitsSnapshotV1),
+});
+
+const ProviderUsageLimitsStreamEventV2 = Schema.Struct({
+  version: Schema.Literal(2),
   type: Schema.Literal("snapshot"),
   entries: Schema.Array(ProviderUsageLimitsSnapshot),
 });
+export const ProviderUsageLimitsStreamEvent = Schema.Union([
+  ProviderUsageLimitsStreamEventV1,
+  ProviderUsageLimitsStreamEventV2,
+]);
 export type ProviderUsageLimitsStreamEvent = typeof ProviderUsageLimitsStreamEvent.Type;

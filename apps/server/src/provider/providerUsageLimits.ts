@@ -54,6 +54,7 @@ export const mergeProviderUsageLimitsRecord = (
     readonly observedAt: string;
     readonly limits: ProviderUsageLimitsUpdate;
     readonly nowEpochMs: number;
+    readonly replaceExisting?: boolean;
   },
 ): ProviderUsageLimitsRecord | undefined => {
   if (!isSupportedUsageLimitsDriver(input.driver)) {
@@ -68,8 +69,8 @@ export const mergeProviderUsageLimitsRecord = (
       providerInstanceId: input.providerInstanceId,
       driver: input.driver,
       observedAt: input.observedAt,
-      ...(correlated?.fiveHour ? { fiveHour: correlated.fiveHour } : {}),
-      ...(correlated?.weekly ? { weekly: correlated.weekly } : {}),
+      ...(!input.replaceExisting && correlated?.fiveHour ? { fiveHour: correlated.fiveHour } : {}),
+      ...(!input.replaceExisting && correlated?.weekly ? { weekly: correlated.weekly } : {}),
       ...(input.limits.fiveHour ? { fiveHour: input.limits.fiveHour } : {}),
       ...(input.limits.weekly ? { weekly: input.limits.weekly } : {}),
     },

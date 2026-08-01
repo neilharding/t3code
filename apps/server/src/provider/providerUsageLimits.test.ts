@@ -69,6 +69,24 @@ describe("provider usage limit projection", () => {
     expect(merged).toEqual(makeRecord({ observedAt: "1970-01-01T00:16:41.000Z" }));
   });
 
+  it("replaces stale windows when an authoritative reader snapshot omits them", () => {
+    expect(
+      mergeProviderUsageLimitsRecord(makeRecord(), {
+        providerInstanceId: instanceId,
+        driver: codex,
+        observedAt: "1970-01-01T00:16:41.000Z",
+        limits: { weekly: { usedPercent: 61, resetsAt: WEEKLY_RESET } },
+        nowEpochMs: NOW,
+        replaceExisting: true,
+      }),
+    ).toEqual({
+      providerInstanceId: instanceId,
+      driver: codex,
+      observedAt: "1970-01-01T00:16:41.000Z",
+      weekly: { usedPercent: 61, resetsAt: WEEKLY_RESET },
+    });
+  });
+
   it("rejects unsupported drivers", () => {
     const update: ProviderUsageLimitsUpdate = {
       fiveHour: { usedPercent: 23, resetsAt: FIVE_HOUR_RESET },

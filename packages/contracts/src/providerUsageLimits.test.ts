@@ -79,9 +79,29 @@ describe("ProviderUsageLimitsSnapshot", () => {
 });
 
 describe("ProviderUsageLimitsStreamEvent", () => {
-  it("decodes a full replacement snapshot array", () => {
+  it("keeps the legacy v1 stream limited to complete snapshots", () => {
+    expect(() =>
+      decodeStreamEvent({
+        version: 1,
+        type: "snapshot",
+        entries: [
+          {
+            providerInstanceId: "codex",
+            driver: "codex",
+            observedAt: "2026-02-28T00:00:00.000Z",
+            weekly: {
+              usedPercent: 50,
+              resetsAt: "2026-03-07T00:00:00.000Z",
+            },
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("decodes a partial v2 replacement snapshot array", () => {
     const event = decodeStreamEvent({
-      version: 1,
+      version: 2,
       type: "snapshot",
       entries: [
         {

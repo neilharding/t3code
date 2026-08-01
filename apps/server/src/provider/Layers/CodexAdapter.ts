@@ -1201,7 +1201,15 @@ function mapToRuntimeEvents(
       {
         type: "account.rate-limits.updated",
         ...runtimeEventBase(event, canonicalThreadId),
-        payload: { limits },
+        payload: {
+          limits,
+          ...(event.payload &&
+          typeof event.payload === "object" &&
+          "replaceExisting" in event.payload &&
+          event.payload.replaceExisting === true
+            ? { replaceExisting: true }
+            : {}),
+        },
       },
     ];
   }

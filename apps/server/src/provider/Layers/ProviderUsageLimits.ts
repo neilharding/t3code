@@ -208,6 +208,7 @@ const makeProviderUsageLimits = Effect.fn("makeProviderUsageLimits")(function* (
     readonly driver: ProviderDriverKind;
     readonly observedAt: string;
     readonly limits: ProviderUsageLimitsUpdate;
+    readonly replaceExisting?: boolean;
   }) {
     return yield* updateSemaphore.withPermits(1)(
       Effect.gen(function* () {
@@ -225,6 +226,7 @@ const makeProviderUsageLimits = Effect.fn("makeProviderUsageLimits")(function* (
           observedAt: input.observedAt,
           limits: input.limits,
           nowEpochMs: currentNow,
+          ...(input.replaceExisting ? { replaceExisting: true } : {}),
         });
         if (merged === undefined) return;
         const next = new Map(previous).set(input.providerInstanceId, merged);
@@ -267,6 +269,7 @@ const makeProviderUsageLimits = Effect.fn("makeProviderUsageLimits")(function* (
             driver: instance.driverKind,
             observedAt,
             limits,
+            replaceExisting: true,
           });
         }),
       { concurrency: "unbounded", discard: true },
@@ -286,6 +289,7 @@ const makeProviderUsageLimits = Effect.fn("makeProviderUsageLimits")(function* (
         driver: event.provider,
         observedAt: event.createdAt,
         limits: event.payload.limits,
+        ...(event.payload.replaceExisting ? { replaceExisting: true } : {}),
       });
     }),
     Effect.forkScoped,

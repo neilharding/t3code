@@ -64,7 +64,10 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
 import { ProviderInstanceId } from "./providerInstance.ts";
-import { ProviderUsageLimitsStreamEvent } from "./providerUsageLimits.ts";
+import {
+  ProviderUsageLimitsStreamEvent,
+  ProviderUsageLimitsSubscription,
+} from "./providerUsageLimits.ts";
 import {
   RelayClientInstallFailedError,
   RelayClientInstallProgressEventSchema,
@@ -758,7 +761,7 @@ export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerCon
 });
 
 export const WsSubscribeProviderUsageLimitsRpc = Rpc.make(WS_METHODS.subscribeProviderUsageLimits, {
-  payload: Schema.Struct({}),
+  payload: ProviderUsageLimitsSubscription,
   success: ProviderUsageLimitsStreamEvent,
   error: EnvironmentAuthorizationError,
   stream: true,

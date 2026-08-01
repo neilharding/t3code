@@ -92,7 +92,7 @@ const decodeCodexTurnStartParamsWithCollaborationMode = Schema.decodeUnknownEffe
  */
 export const toCodexRateLimitsUpdatedPayload = (
   response: EffectCodexSchema.V2GetAccountRateLimitsResponse,
-) => ({ rateLimits: response.rateLimits });
+) => ({ rateLimits: response.rateLimits, replaceExisting: true });
 
 interface CodexRateLimitsClient<E> {
   readonly request: (

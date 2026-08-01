@@ -98,7 +98,7 @@ export const primaryProviderUsageLimitsAtom = Atom.make(
     return environmentId === null
       ? EMPTY_PROVIDER_USAGE_LIMITS
       : providerUsageLimitsFromStreamResult(
-          get(serverEnvironment.usageLimits({ environmentId, input: {} })),
+          get(serverEnvironment.usageLimits({ environmentId, input: { version: 2 } })),
         );
   },
 ).pipe(Atom.withLabel("web-primary-provider-usage-limits"));

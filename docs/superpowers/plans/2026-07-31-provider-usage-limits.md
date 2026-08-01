@@ -187,7 +187,7 @@ Run: `vp run --filter t3 typecheck`
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add apps/server/src/provider/Layers/CodexAdapter.ts apps/server/src/provider/Layers/CodexAdapter.test.ts apps/server/src/provider/Layers/ClaudeAdapter.ts apps/server/src/provider/Layers/ClaudeAdapter.test.ts
@@ -206,7 +206,7 @@ git commit -m "feat(server): normalize provider usage limits"
 - Create: `apps/server/src/provider/Layers/ProviderUsageLimits.ts`
 - Create: `apps/server/src/provider/Layers/ProviderUsageLimits.test.ts`
 
-- [ ] **Step 1: Write failing pure projection tests**
+- [x] **Step 1: Write failing pure projection tests**
 
 Specify pure helpers for:
 
@@ -218,13 +218,13 @@ Specify pure helpers for:
 - sorting output in current provider-registry order, not map insertion order;
 - pruning a removed, driver-mismatched, disabled, unavailable, or unauthenticated instance.
 
-- [ ] **Step 2: Run the pure projection test and confirm failure**
+- [x] **Step 2: Run the pure projection test and confirm failure**
 
 Run: `vp test run apps/server/src/provider/providerUsageLimits.test.ts`
 
 Expected: FAIL because the projection helpers do not exist.
 
-- [ ] **Step 3: Implement the pure merge/projection module**
+- [x] **Step 3: Implement the pure merge/projection module**
 
 Use an internal partial record:
 
@@ -240,21 +240,21 @@ interface ProviderUsageLimitsRecord {
 
 Make time an explicit `nowEpochMs` argument so all expiry behavior is deterministic under tests.
 
-- [ ] **Step 4: Write failing cache tests**
+- [x] **Step 4: Write failing cache tests**
 
 Test one atomic JSON file per instance using `<providerStatusCacheDir>/<instanceId>.usage-limits.json`. Verify round-trip, missing file, invalid JSON/schema, instance/driver mismatch rejection, and non-sensitive warning attributes that do not contain invalid file contents.
 
-- [ ] **Step 5: Run cache tests and confirm failure**
+- [x] **Step 5: Run cache tests and confirm failure**
 
 Run: `vp test run apps/server/src/provider/providerUsageLimitsCache.test.ts`
 
 Expected: FAIL because the cache module does not exist.
 
-- [ ] **Step 6: Implement the cache module**
+- [x] **Step 6: Implement the cache module**
 
 Follow `providerStatusCache.ts`: Effect `FileSystem`/`Path`, `Schema.fromJsonString`, and `writeFileStringAtomically`. Export path resolution, read, and write helpers. Log only path, expected identity, and structural error tag.
 
-- [ ] **Step 7: Write failing service-layer tests with controlled streams and clock**
+- [x] **Step 7: Write failing service-layer tests with controlled streams and clock**
 
 Use test layers for `ProviderService`, `ProviderRegistry`, `ServerConfig`, platform services, and `TestClock`. Verify:
 
@@ -266,13 +266,13 @@ Use test layers for `ProviderService`, `ProviderRegistry`, `ServerConfig`, platf
 - cache read/write failures are logged and do not fail the stream;
 - events without `providerInstanceId` or with mismatched/unsupported drivers are ignored.
 
-- [ ] **Step 8: Run the service-layer tests and confirm failure**
+- [x] **Step 8: Run the service-layer tests and confirm failure**
 
 Run: `vp test run apps/server/src/provider/Layers/ProviderUsageLimits.test.ts`
 
 Expected: FAIL because the service and live layer do not exist.
 
-- [ ] **Step 9: Implement `ProviderUsageLimits` and its live layer**
+- [x] **Step 9: Implement `ProviderUsageLimits` and its live layer**
 
 The service interface exposes:
 
@@ -303,6 +303,9 @@ Expected: PASS.
 Run: `vp run --filter t3 typecheck`
 
 Expected: PASS.
+
+The focused tests and targeted lint pass. Final server typecheck remains deferred until Task 4
+completes the new RPC group's authorization, handler, and runtime dependency wiring.
 
 - [ ] **Step 11: Commit**
 

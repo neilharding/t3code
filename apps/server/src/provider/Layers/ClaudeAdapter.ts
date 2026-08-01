@@ -115,6 +115,8 @@ export function normalizeClaudeUsageLimits(rateLimit: SDKRateLimitInfo): Provide
   ) {
     return {};
   }
+  const usedPercent = rateLimit.utilization;
+  const rateLimitType = rateLimit.rateLimitType;
   return Option.match(
     DateTime.make(
       rateLimit.resetsAt < 100_000_000_000 ? rateLimit.resetsAt * 1_000 : rateLimit.resetsAt,
@@ -123,10 +125,10 @@ export function normalizeClaudeUsageLimits(rateLimit: SDKRateLimitInfo): Provide
       onNone: () => ({}),
       onSome: (resetsAt) => {
         const window = {
-          usedPercent: rateLimit.utilization,
+          usedPercent,
           resetsAt: DateTime.formatIso(resetsAt),
         };
-        return rateLimit.rateLimitType === "five_hour" ? { fiveHour: window } : { weekly: window };
+        return rateLimitType === "five_hour" ? { fiveHour: window } : { weekly: window };
       },
     },
   );
